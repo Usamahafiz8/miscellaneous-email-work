@@ -44,7 +44,7 @@ export default function Sidebar({ active, onChange, emailCount, hiringCount, col
         </div>
         {!collapsed && (
           <div className="min-w-0">
-            <p className="text-white text-sm font-bold leading-tight">ZedroLab</p>
+            <p className="text-white text-sm font-bold leading-tight">Asad ullah</p>
             <p className="text-[#667eea] text-[10px] font-medium tracking-wide uppercase">Email Portal</p>
           </div>
         )}

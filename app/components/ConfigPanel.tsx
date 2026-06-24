@@ -80,7 +80,7 @@ export default function ConfigPanel({
                 type="email"
                 value={email}
                 onChange={(e) => onFieldChange("email", e.target.value)}
-                placeholder="hr@zedrolab.io"
+                placeholder="hr@asadullahio"
                 className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#667eea]/30 focus:border-[#667eea]"
               />
             </div>
