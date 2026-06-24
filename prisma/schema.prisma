@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model EmailSummary {
+  emailId        String   @id
+  from           String
+  subject        String
+  date           String
+  summary        String
+  keyPoints      String[]
+  sentiment      String
+  category       String
+  priority       String
+  actionRequired String
+  purpose        String
+  body           String?
+  htmlBody       String?
+  status         String   @default("New")
+  fetchedAt      DateTime @default(now())
+
+  @@map("email_summaries")
+}

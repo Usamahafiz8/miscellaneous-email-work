@@ -1,38 +1,52 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Groq from "groq-sdk";
 import type {
   EmailMessage, EmailSummary, SummaryLength,
   Category, Priority, ActionRequired, Sentiment,
   HiringCriteria, CandidateEvaluation,
 } from "./types";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-const MAX_TOKENS: Record<SummaryLength, number> = { short: 500, medium: 700, long: 1000 };
+const MAX_TOKENS: Record<SummaryLength, number> = { short: 1500, medium: 2000, long: 3000 };
+const BODY_LIMIT = 400;  // chars per email in the batch prompt
+const CHUNK_SIZE = 10;   // emails per API call
 
 const VALID_SENTIMENTS: Sentiment[] = ["positive", "neutral", "negative"];
 const VALID_CATEGORIES: Category[] = ["Hiring", "Client Support", "Sales", "Finance", "Internal", "Marketing", "Technical", "General"];
 const VALID_PRIORITIES: Priority[] = ["Critical", "High", "Medium", "Low"];
 const VALID_ACTIONS: ActionRequired[] = ["Yes", "No"];
 
-function buildSummaryPrompt(subject: string, from: string, body: string, length: SummaryLength): string {
+function buildBatchPrompt(
+  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText">[],
+  length: SummaryLength
+): string {
   const sentences = length === "short" ? "2-3" : length === "medium" ? "3-4" : "5-6";
-  return `You are an AI assistant analyzing business emails for a company dashboard. Analyze the email and respond ONLY with valid JSON (no markdown, no code blocks).
 
-From: ${from}
-Subject: ${subject}
-Body:
-${body}
+  const emailBlocks = emails.map((e, i) =>
+    `--- Email ${i + 1} ---
+ID: ${e.id}
+From: ${e.from}
+Subject: ${e.subject}
+Body: ${e.fullText.slice(0, BODY_LIMIT)}${e.fullText.length > BODY_LIMIT ? "..." : ""}`
+  ).join("\n\n");
 
-Return exactly this JSON:
-{
-  "summary": "${sentences}-sentence plain-English summary",
-  "keyPoints": ["key point 1", "key point 2", "key point 3"],
-  "sentiment": "positive|neutral|negative",
-  "category": "Hiring|Client Support|Sales|Finance|Internal|Marketing|Technical|General",
-  "priority": "Critical|High|Medium|Low",
-  "actionRequired": "Yes|No",
-  "purpose": "short label e.g. Job Application, Meeting Request, Invoice, Newsletter"
-}
+  return `You are analyzing business emails for a company dashboard. Analyze ALL emails below and respond ONLY with a valid JSON array — no markdown, no code blocks.
+
+${emailBlocks}
+
+Return exactly this JSON array with one object per email in the same order:
+[
+  {
+    "emailId": "<the ID from the email block>",
+    "summary": "${sentences}-sentence plain-English summary",
+    "keyPoints": ["key point 1", "key point 2", "key point 3"],
+    "sentiment": "positive|neutral|negative",
+    "category": "Hiring|Client Support|Sales|Finance|Internal|Marketing|Technical|General",
+    "priority": "Critical|High|Medium|Low",
+    "actionRequired": "Yes|No",
+    "purpose": "short label e.g. Job Application, Meeting Request, Invoice, Newsletter"
+  }
+]
 
 Category rules: Hiring=resumes/applications, Client Support=customer issues, Sales=proposals/leads, Finance=invoices/payments, Internal=team comms/HR, Marketing=campaigns/promos, Technical=system alerts/IT, General=everything else
 Priority rules: Critical=server down/urgent legal, High=client awaiting reply/urgent meetings, Medium=standard correspondence, Low=newsletters/notifications
@@ -44,51 +58,57 @@ function safeParseJSON(text: string) {
   return JSON.parse(cleaned);
 }
 
-export async function summarizeEmails(
-  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText">[],
+async function summarizeChunk(
+  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody">[],
   summaryLength: SummaryLength
 ): Promise<EmailSummary[]> {
+  const message = await client.chat.completions.create({
+    model: "llama-3.3-70b-versatile",
+    max_tokens: MAX_TOKENS[summaryLength],
+    messages: [{ role: "user", content: buildBatchPrompt(emails, summaryLength) }],
+  });
+
+  const text = message.choices[0]?.message?.content;
+  if (!text) throw new Error("No text in response");
+
+  const parsed: Record<string, unknown>[] = safeParseJSON(text);
+  const emailMap = new Map(emails.map((e) => [e.id, e]));
+
+  return parsed.map((item) => {
+    const emailId = String(item.emailId ?? "");
+    const original = emailMap.get(emailId);
+    return {
+      emailId,
+      from: original?.from ?? "",
+      subject: original?.subject ?? "",
+      date: original?.date ?? "",
+      body: original?.fullText ?? "",
+      htmlBody: original?.htmlBody ?? undefined,
+      summary: String(item.summary ?? ""),
+      keyPoints: Array.isArray(item.keyPoints) ? (item.keyPoints as string[]).slice(0, 5) : [],
+      sentiment: VALID_SENTIMENTS.includes(item.sentiment as Sentiment) ? (item.sentiment as Sentiment) : "neutral",
+      category: VALID_CATEGORIES.includes(item.category as Category) ? (item.category as Category) : "General",
+      priority: VALID_PRIORITIES.includes(item.priority as Priority) ? (item.priority as Priority) : "Medium",
+      actionRequired: VALID_ACTIONS.includes(item.actionRequired as ActionRequired) ? (item.actionRequired as ActionRequired) : "No",
+      purpose: String(item.purpose ?? "General Email"),
+      status: "New",
+      fetchedAt: new Date().toISOString(),
+    };
+  });
+}
+
+export async function summarizeEmails(
+  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody">[],
+  summaryLength: SummaryLength
+): Promise<EmailSummary[]> {
+  if (emails.length === 0) return [];
+
   const results: EmailSummary[] = [];
-
-  for (const email of emails) {
-    try {
-      const message = await client.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: MAX_TOKENS[summaryLength],
-        messages: [{ role: "user", content: buildSummaryPrompt(email.subject, email.from, email.fullText, summaryLength) }],
-      });
-
-      const textBlock = message.content.find((b) => b.type === "text");
-      if (!textBlock || textBlock.type !== "text") throw new Error("No text in response");
-
-      const parsed = safeParseJSON(textBlock.text);
-
-      results.push({
-        emailId: email.id,
-        from: email.from,
-        subject: email.subject,
-        date: email.date,
-        summary: parsed.summary ?? "",
-        keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints.slice(0, 5) : [],
-        sentiment: VALID_SENTIMENTS.includes(parsed.sentiment) ? parsed.sentiment : "neutral",
-        category: VALID_CATEGORIES.includes(parsed.category) ? parsed.category : "General",
-        priority: VALID_PRIORITIES.includes(parsed.priority) ? parsed.priority : "Medium",
-        actionRequired: VALID_ACTIONS.includes(parsed.actionRequired) ? parsed.actionRequired : "No",
-        purpose: parsed.purpose ?? "General Email",
-        status: "New",
-        fetchedAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      results.push({
-        emailId: email.id, from: email.from, subject: email.subject, date: email.date,
-        summary: `Error: ${err instanceof Error ? err.message : String(err)}`,
-        keyPoints: [], sentiment: "neutral", category: "General",
-        priority: "Low", actionRequired: "No", purpose: "Unknown",
-        status: "New", fetchedAt: new Date().toISOString(),
-      });
-    }
+  for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
+    const chunk = emails.slice(i, i + CHUNK_SIZE);
+    const summaries = await summarizeChunk(chunk, summaryLength);
+    results.push(...summaries);
   }
-
   return results;
 }
 
@@ -115,14 +135,14 @@ Analyze whether this candidate meets the requirements. Respond ONLY with valid J
   "reasoning": "2-3 sentence explanation of match score and recommendation"
 }`;
 
-  const message = await client.messages.create({
-    model: "claude-sonnet-4-6",
+  const message = await client.chat.completions.create({
+    model: "llama-3.3-70b-versatile",
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],
   });
 
-  const textBlock = message.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") throw new Error("No text in response");
+  const text = message.choices[0]?.message?.content;
+  if (!text) throw new Error("No text in response");
 
-  return safeParseJSON(textBlock.text) as CandidateEvaluation;
+  return safeParseJSON(text) as CandidateEvaluation;
 }

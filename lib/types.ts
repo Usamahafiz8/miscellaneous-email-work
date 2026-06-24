@@ -12,6 +12,7 @@ export interface EmailMessage {
   date: string;
   text: string;
   fullText: string;
+  htmlBody?: string;
 }
 
 export type SummaryLength = "short" | "medium" | "long";
@@ -27,6 +28,8 @@ export interface EmailSummary {
   from: string;
   subject: string;
   date: string;
+  body?: string;
+  htmlBody?: string;
   summary: string;
   keyPoints: string[];
   sentiment: Sentiment;

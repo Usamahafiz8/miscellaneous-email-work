@@ -48,8 +48,9 @@ export async function testIMAPConnection(config: IMAPConfig): Promise<void> {
 
 export async function fetchEmails(
   config: IMAPConfig,
-  maxEmails: number
-): Promise<EmailMessage[]> {
+  pageSize: number,
+  offset: number = 0
+): Promise<{ emails: EmailMessage[]; totalCount: number }> {
   return new Promise((resolve, reject) => {
     const imap = createImapClient(config);
     const messages: EmailMessage[] = [];
@@ -71,12 +72,14 @@ export async function fetchEmails(
         if (total === 0) {
           clearTimeout(timeout);
           imap.end();
-          return resolve([]);
+          return resolve({ emails: [], totalCount: 0 });
         }
 
-        const fetchCount = Math.min(maxEmails, total);
-        const start = Math.max(1, total - fetchCount + 1);
-        const range = `${start}:${total}`;
+        // newest-first pagination: offset skips from the most recent end
+        const end = Math.max(1, total - offset);
+        const fetchCount = Math.min(pageSize, end);
+        const start = Math.max(1, end - fetchCount + 1);
+        const range = `${start}:${end}`;
 
         const fetcher = imap.seq.fetch(range, {
           bodies: ["HEADER.FIELDS (FROM SUBJECT DATE)", "TEXT"],
@@ -124,6 +127,10 @@ export async function fetchEmails(
 
                 fullText = fullText.slice(0, MAX_BODY_LENGTH).trim();
 
+                const htmlBody = parsed.html
+                  ? parsed.html.slice(0, 50_000)
+                  : undefined;
+
                 messages.push({
                   id: `${messageId}-${seqno}`,
                   from: fromAddress,
@@ -131,6 +138,7 @@ export async function fetchEmails(
                   date,
                   text: fullText.slice(0, PREVIEW_LENGTH),
                   fullText,
+                  htmlBody,
                 });
               } catch {
                 // Skip unparseable messages
@@ -155,7 +163,7 @@ export async function fetchEmails(
           messages.sort(
             (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
           );
-          resolve(messages);
+          resolve({ emails: messages, totalCount: total });
         });
       });
     });

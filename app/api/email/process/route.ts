@@ -1,10 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { fetchEmails } from "@/lib/imap";
 import { summarizeEmails } from "@/lib/claude";
-import { cacheSummaries } from "@/lib/cache";
+import { cacheSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
 import type { SummaryLength } from "@/lib/types";
 
-export async function POST() {
+const PAGE_SIZE = 50;
+
+export async function POST(request: NextRequest) {
   const config = {
     email: process.env.EMAIL_ADDRESS ?? "",
     password: process.env.EMAIL_PASSWORD ?? "",
@@ -19,31 +21,41 @@ export async function POST() {
     );
   }
 
-  const maxEmails = Math.min(
-    Math.max(1, Number(process.env.MAX_EMAILS ?? 20)),
-    100
-  );
-
   const summaryLength = (["short", "medium", "long"].includes(
     process.env.SUMMARY_LENGTH ?? ""
   )
     ? process.env.SUMMARY_LENGTH
     : "medium") as SummaryLength;
 
+  const body = await request.json().catch(() => ({}));
+  const offset = Math.max(0, Number(body.offset ?? 0));
+
   try {
-    const emails = await fetchEmails(config, maxEmails);
+    const { emails, totalCount } = await fetchEmails(config, PAGE_SIZE, offset);
 
     if (emails.length === 0) {
-      return NextResponse.json({ success: true, summaries: [], emailCount: 0 });
+      return NextResponse.json({ success: true, summaries: [], emailCount: 0, totalCount, offset });
     }
 
-    const summaries = await summarizeEmails(emails, summaryLength);
-    cacheSummaries(summaries);
+    // Check DB for which emails are already summarized
+    const existingIds = await getExistingEmailIds(emails.map((e) => e.id));
+    const newEmails = emails.filter((e) => !existingIds.has(e.id));
+
+    if (newEmails.length > 0) {
+      const newSummaries = await summarizeEmails(newEmails, summaryLength);
+      await cacheSummaries(newSummaries);
+    }
+
+    // Return summaries for this full page from DB
+    const summaries = await getSummariesByIds(emails.map((e) => e.id));
 
     return NextResponse.json({
       success: true,
       summaries,
-      emailCount: emails.length,
+      emailCount: summaries.length,
+      newCount: newEmails.length,
+      totalCount,
+      offset,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Processing failed";

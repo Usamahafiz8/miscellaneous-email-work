@@ -1,54 +1,101 @@
+import { prisma } from "./db";
 import type { EmailSummary } from "./types";
 
-interface CacheEntry {
-  summaries: EmailSummary[];
-  storedAt: number;
+function toEmailSummary(row: {
+  emailId: string; from: string; subject: string; date: string;
+  body: string | null; htmlBody: string | null; summary: string; keyPoints: string[];
+  sentiment: string; category: string; priority: string;
+  actionRequired: string; purpose: string; status: string; fetchedAt: Date;
+}): EmailSummary {
+  return {
+    emailId: row.emailId,
+    from: row.from,
+    subject: row.subject,
+    date: row.date,
+    body: row.body ?? undefined,
+    htmlBody: row.htmlBody ?? undefined,
+    summary: row.summary,
+    keyPoints: row.keyPoints,
+    sentiment: row.sentiment as EmailSummary["sentiment"],
+    category: row.category as EmailSummary["category"],
+    priority: row.priority as EmailSummary["priority"],
+    actionRequired: row.actionRequired as EmailSummary["actionRequired"],
+    purpose: row.purpose,
+    status: row.status as EmailSummary["status"],
+    fetchedAt: row.fetchedAt.toISOString(),
+  };
 }
 
-const TTL_MS = 60 * 60 * 1000; // 1 hour
+export async function getCachedSummaries(limit: number, offset: number) {
+  const [summaries, total] = await Promise.all([
+    prisma.emailSummary.findMany({
+      orderBy: { date: "desc" },
+      take: limit,
+      skip: offset,
+    }),
+    prisma.emailSummary.count(),
+  ]);
 
-// Module-level in-memory cache (persists across requests in same server process)
-const store: CacheEntry = {
-  summaries: [],
-  storedAt: 0,
-};
-
-export function getCachedSummaries(limit: number, offset: number) {
-  const summaries = [...store.summaries];
   return {
-    summaries: summaries.slice(offset, offset + limit),
-    total: summaries.length,
+    summaries: summaries.map(toEmailSummary),
+    total,
     limit,
     offset,
   };
 }
 
-export function cacheSummaries(summaries: EmailSummary[]): void {
-  const now = Date.now();
+export async function getExistingEmailIds(ids: string[]): Promise<Set<string>> {
+  const rows = await prisma.emailSummary.findMany({
+    where: { emailId: { in: ids } },
+    select: { emailId: true },
+  });
+  return new Set(rows.map((r) => r.emailId));
+}
 
-  // Evict if cache is older than TTL
-  if (now - store.storedAt > TTL_MS) {
-    store.summaries = [];
-  }
+export async function getSummariesByIds(ids: string[]): Promise<EmailSummary[]> {
+  const rows = await prisma.emailSummary.findMany({
+    where: { emailId: { in: ids } },
+  });
+  // preserve the order of ids
+  const map = new Map(rows.map((r) => [r.emailId, r]));
+  return ids.flatMap((id) => (map.has(id) ? [toEmailSummary(map.get(id)!)] : []));
+}
 
-  // Upsert by emailId to avoid duplicates
-  const existing = new Map(store.summaries.map((s) => [s.emailId, s]));
-  for (const s of summaries) {
-    existing.set(s.emailId, { ...s, fetchedAt: new Date().toISOString() });
-  }
-
-  store.summaries = Array.from(existing.values()).sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
+  await Promise.all(
+    summaries.map((s) =>
+      prisma.emailSummary.upsert({
+        where: { emailId: s.emailId },
+        update: {
+          summary: s.summary,
+          keyPoints: s.keyPoints,
+          sentiment: s.sentiment,
+          category: s.category,
+          priority: s.priority,
+          actionRequired: s.actionRequired,
+          purpose: s.purpose,
+        },
+        create: {
+          emailId: s.emailId,
+          from: s.from,
+          subject: s.subject,
+          date: s.date,
+          body: s.body ?? null,
+          htmlBody: s.htmlBody ?? null,
+          summary: s.summary,
+          keyPoints: s.keyPoints,
+          sentiment: s.sentiment,
+          category: s.category,
+          priority: s.priority,
+          actionRequired: s.actionRequired,
+          purpose: s.purpose,
+          status: s.status ?? "New",
+        },
+      })
+    )
   );
-  store.storedAt = now;
 }
 
-export function clearCache(): void {
-  store.summaries = [];
-  store.storedAt = 0;
-}
-
-export function getCacheAge(): number | null {
-  if (store.storedAt === 0) return null;
-  return Date.now() - store.storedAt;
+export async function clearCache(): Promise<void> {
+  await prisma.emailSummary.deleteMany();
 }

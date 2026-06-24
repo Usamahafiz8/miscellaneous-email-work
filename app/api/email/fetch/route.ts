@@ -22,8 +22,8 @@ export async function GET() {
   );
 
   try {
-    const emails = await fetchEmails(config, maxEmails);
-    return NextResponse.json({ success: true, emails, count: emails.length });
+    const { emails, totalCount } = await fetchEmails(config, maxEmails);
+    return NextResponse.json({ success: true, emails, count: emails.length, totalCount });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch emails";
     return NextResponse.json({ success: false, error: message }, { status: 500 });
