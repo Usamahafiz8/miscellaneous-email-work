@@ -1,11 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchEmails } from "@/lib/imap";
 import { summarizeEmails } from "@/lib/claude";
-import { cacheSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
+import { cacheSummaries, getCachedSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
 import type { SummaryLength } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
+// Load emails from DB only — no IMAP, no AI calls
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const offset = Math.max(0, Number(searchParams.get("offset") ?? 0));
+
+  try {
+    const { summaries, total } = await getCachedSummaries(PAGE_SIZE, offset);
+    return NextResponse.json({
+      success: true,
+      summaries,
+      emailCount: summaries.length,
+      totalCount: total,
+      offset,
+      fromCache: true,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to load from database";
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
+}
+
+// Sync from IMAP — runs AI only for emails not already in DB
 export async function POST(request: NextRequest) {
   const config = {
     email: process.env.EMAIL_ADDRESS ?? "",

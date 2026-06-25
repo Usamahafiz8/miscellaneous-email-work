@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { EmailSummary, EmailStatus, NavView } from "@/lib/types";
 import Sidebar from "./Sidebar";
 import DashboardHome from "./DashboardHome";
@@ -15,25 +15,24 @@ export default function Dashboard() {
   const [statusOverrides, setStatusOverrides] = useState<Map<string, EmailStatus>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
 
-  const fetchEmails = useCallback(async (offset = 0) => {
+  // Load from DB (no IMAP, no AI) — used on mount and for "load more"
+  const loadFromDB = useCallback(async (offset = 0) => {
     const isFirstPage = offset === 0;
     if (isFirstPage) setIsLoading(true);
     else setIsLoadingMore(true);
     setError(null);
     try {
-      const res = await fetch("/api/email/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset }),
-      });
+      const res = await fetch(`/api/email/process?offset=${offset}`);
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to fetch emails");
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to load emails");
 
       const incoming: EmailSummary[] = data.summaries ?? [];
       if (isFirstPage) {
@@ -47,7 +46,6 @@ export default function Dashboard() {
       }
       setTotalCount(data.totalCount ?? 0);
       setNextOffset(offset + incoming.length);
-      setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -56,7 +54,44 @@ export default function Dashboard() {
     }
   }, []);
 
-  const loadMore = useCallback(() => fetchEmails(nextOffset), [fetchEmails, nextOffset]);
+  // Sync from IMAP — runs AI only for emails not in DB yet
+  const syncEmails = useCallback(async () => {
+    setIsSyncing(true);
+    setSyncMessage(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/email/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset: 0 }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
+
+      const incoming: EmailSummary[] = data.summaries ?? [];
+      setSummaries(incoming);
+      setStatusOverrides(new Map());
+      setTotalCount(data.totalCount ?? 0);
+      setNextOffset(incoming.length);
+      setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+
+      const newCount: number = data.newCount ?? 0;
+      setSyncMessage(
+        newCount > 0
+          ? `${newCount} new email${newCount === 1 ? "" : "s"} found and summarized`
+          : "Already up to date — no new emails"
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  // Load cached emails on mount
+  useEffect(() => { loadFromDB(0); }, [loadFromDB]);
+
+  const loadMore = useCallback(() => loadFromDB(nextOffset), [loadFromDB, nextOffset]);
 
   const handleStatusChange = useCallback((emailId: string, status: EmailStatus) => {
     setStatusOverrides((prev) => new Map(prev).set(emailId, status));
@@ -83,6 +118,16 @@ export default function Dashboard() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-hidden rounded-l-2xl">
+        {/* Sync feedback banner */}
+        {syncMessage && (
+          <div className="px-6 pt-4 flex-shrink-0">
+            <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 text-indigo-700 text-sm rounded-lg px-4 py-2">
+              <span>{syncMessage}</span>
+              <button onClick={() => setSyncMessage(null)} className="ml-4 text-indigo-400 hover:text-indigo-600">✕</button>
+            </div>
+          </div>
+        )}
+
         {/* Error banner */}
         {error && (
           <div className="px-6 pt-4 flex-shrink-0">
@@ -95,20 +140,20 @@ export default function Dashboard() {
           {activeNav === "home" && (
             <DashboardHome
               summaries={enriched}
-              isLoading={isLoading}
+              isLoading={isLoading || isSyncing}
               lastFetched={lastFetched}
-              onFetch={() => fetchEmails(0)}
+              onFetch={syncEmails}
               onNavigate={setActiveNav}
             />
           )}
           {activeNav === "inbox" && (
             <InboxView
               summaries={enriched}
-              isLoading={isLoading}
+              isLoading={isLoading || isSyncing}
               isLoadingMore={isLoadingMore}
               hasMore={hasMore}
               totalCount={totalCount}
-              onFetch={() => fetchEmails(0)}
+              onFetch={syncEmails}
               onLoadMore={loadMore}
               onStatusChange={handleStatusChange}
             />
@@ -116,8 +161,8 @@ export default function Dashboard() {
           {activeNav === "hiring" && (
             <HiringView
               summaries={hiringEmails}
-              isLoading={isLoading}
-              onFetch={() => fetchEmails(0)}
+              isLoading={isLoading || isSyncing}
+              onFetch={syncEmails}
             />
           )}
           {activeNav === "analytics" && (
