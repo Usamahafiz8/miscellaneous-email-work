@@ -6,8 +6,6 @@ node_modules/
 out/
 
 # Environment
-.env
-.env.local
 .env.*.local
 
 # Build
@@ -22,3 +20,4 @@ build/
 .email-summaries.json
 
 /lib/generated/prisma
+config.bat

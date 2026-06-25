@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Email Summarizer",
-  description: "AI-powered email summarization for HR communications",
+  title: "MailAI — Smart Inbox",
+  description: "AI-powered email management — summaries, insights, and hiring automation",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

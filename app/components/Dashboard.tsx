@@ -10,7 +10,7 @@ import AnalyticsView from "./AnalyticsView";
 import ErrorAlert from "./ErrorAlert";
 
 export default function Dashboard() {
-  const [activeNav, setActiveNav] = useState<NavView>("home");
+  const [activeNav, setActiveNav] = useState<NavView>("inbox");
   const [summaries, setSummaries] = useState<EmailSummary[]>([]);
   const [statusOverrides, setStatusOverrides] = useState<Map<string, EmailStatus>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
@@ -103,21 +103,24 @@ export default function Dashboard() {
   );
 
   const hiringEmails = useMemo(() => enriched.filter((s) => s.category === "Hiring"), [enriched]);
+  const unreadCount = useMemo(() => enriched.filter((s) => s.status === "New").length, [enriched]);
   const hasMore = totalCount > 0 && enriched.length < totalCount;
 
   return (
-    <div className="flex h-screen bg-[#0f172a] overflow-hidden">
+    <div className="flex h-screen bg-[#0f172a] overflow-hidden font-sans">
       <Sidebar
         active={activeNav}
         onChange={setActiveNav}
         emailCount={enriched.length}
+        unreadCount={unreadCount}
         hiringCount={hiringEmails.length}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((c) => !c)}
+        onCompose={() => setActiveNav("inbox")}
       />
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-hidden rounded-l-2xl">
+      <div className="flex-1 flex flex-col min-w-0 bg-white overflow-hidden">
         {/* Sync feedback banner */}
         {syncMessage && (
           <div className="px-6 pt-4 flex-shrink-0">
