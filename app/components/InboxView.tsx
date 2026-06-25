@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import type { EmailSummary, EmailStatus, Priority } from "@/lib/types";
+import { useState, useMemo, useEffect, useRef } from "react";
+import type { EmailSummary, EmailStatus, Priority, EmailAttachment } from "@/lib/types";
 import { STATUSES } from "@/lib/types";
 
 interface InboxViewProps {
@@ -75,6 +75,45 @@ function getSenderEmail(from: string) {
 
 function getSenderInitial(from: string) {
   return getSenderName(from).charAt(0).toUpperCase();
+}
+
+function PdfViewer({ attachment }: { attachment: EmailAttachment }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const prevUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (prevUrl.current) URL.revokeObjectURL(prevUrl.current);
+    const bytes = Uint8Array.from(atob(attachment.data), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    setBlobUrl(url);
+    prevUrl.current = url;
+    return () => URL.revokeObjectURL(url);
+  }, [attachment.data]);
+
+  if (!blobUrl) return null;
+
+  return (
+    <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
+      <div className="flex items-center justify-between px-3 py-2 bg-gray-100 border-b border-gray-200">
+        <div className="flex items-center gap-2 min-w-0">
+          <svg className="w-4 h-4 text-red-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM8.5 17.5v-1h1v1h-1zm0-2.5v-2h1v2h-1zm3.5 2.5v-5h1v5h-1zm-5-7h7v1h-7v-1z" />
+          </svg>
+          <span className="text-xs font-medium text-gray-700 truncate">{attachment.filename}</span>
+          <span className="text-[10px] text-gray-400 flex-shrink-0">({(attachment.size / 1024).toFixed(0)} KB)</span>
+        </div>
+        <a href={blobUrl} download={attachment.filename}
+          className="flex items-center gap-1 text-[10px] font-medium text-indigo-600 hover:text-indigo-800 flex-shrink-0 ml-2">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          Download
+        </a>
+      </div>
+      <embed src={blobUrl} type="application/pdf" className="w-full" style={{ height: "480px" }} />
+    </div>
+  );
 }
 
 export default function InboxView({ summaries, isLoading, isLoadingMore, hasMore, totalCount, onFetch, onLoadMore, onStatusChange }: InboxViewProps) {
@@ -219,6 +258,14 @@ export default function InboxView({ summaries, isLoading, isLoadingMore, hasMore
                                 Action needed
                               </span>
                             )}
+                            {(email.attachments?.length ?? 0) > 0 && (
+                              <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                                {email.attachments!.length} PDF
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -343,6 +390,20 @@ export default function InboxView({ summaries, isLoading, isLoadingMore, hasMore
                         </pre>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* PDF Attachments */}
+                {(selectedEmail.attachments?.length ?? 0) > 0 && (
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-3">
+                      Attachments ({selectedEmail.attachments!.length})
+                    </p>
+                    <div className="space-y-3">
+                      {selectedEmail.attachments!.map((att, i) => (
+                        <PdfViewer key={i} attachment={att} />
+                      ))}
+                    </div>
                   </div>
                 )}
 

@@ -59,7 +59,7 @@ function safeParseJSON(text: string) {
 }
 
 async function summarizeChunk(
-  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody">[],
+  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody" | "attachments">[],
   summaryLength: SummaryLength
 ): Promise<EmailSummary[]> {
   const message = await client.chat.completions.create({
@@ -84,6 +84,7 @@ async function summarizeChunk(
       date: original?.date ?? "",
       body: original?.fullText ?? "",
       htmlBody: original?.htmlBody ?? undefined,
+      attachments: original?.attachments,
       summary: String(item.summary ?? ""),
       keyPoints: Array.isArray(item.keyPoints) ? (item.keyPoints as string[]).slice(0, 5) : [],
       sentiment: VALID_SENTIMENTS.includes(item.sentiment as Sentiment) ? (item.sentiment as Sentiment) : "neutral",
@@ -98,7 +99,7 @@ async function summarizeChunk(
 }
 
 export async function summarizeEmails(
-  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody">[],
+  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody" | "attachments">[],
   summaryLength: SummaryLength
 ): Promise<EmailSummary[]> {
   if (emails.length === 0) return [];

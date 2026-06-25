@@ -1,12 +1,17 @@
 import { prisma } from "./db";
-import type { EmailSummary } from "./types";
+import type { EmailSummary, EmailAttachment } from "./types";
 
 function toEmailSummary(row: {
   emailId: string; from: string; subject: string; date: string;
-  body: string | null; htmlBody: string | null; summary: string; keyPoints: string[];
+  body: string | null; htmlBody: string | null; attachments: string | null;
+  summary: string; keyPoints: string[];
   sentiment: string; category: string; priority: string;
   actionRequired: string; purpose: string; status: string; fetchedAt: Date;
 }): EmailSummary {
+  let attachments: EmailAttachment[] | undefined;
+  if (row.attachments) {
+    try { attachments = JSON.parse(row.attachments); } catch { /* ignore */ }
+  }
   return {
     emailId: row.emailId,
     from: row.from,
@@ -14,6 +19,7 @@ function toEmailSummary(row: {
     date: row.date,
     body: row.body ?? undefined,
     htmlBody: row.htmlBody ?? undefined,
+    attachments,
     summary: row.summary,
     keyPoints: row.keyPoints,
     sentiment: row.sentiment as EmailSummary["sentiment"],
@@ -82,6 +88,7 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
           date: s.date,
           body: s.body ?? null,
           htmlBody: s.htmlBody ?? null,
+          attachments: s.attachments ? JSON.stringify(s.attachments) : null,
           summary: s.summary,
           keyPoints: s.keyPoints,
           sentiment: s.sentiment,

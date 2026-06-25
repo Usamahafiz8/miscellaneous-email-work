@@ -5,6 +5,13 @@ export interface IMAPConfig {
   port: number;
 }
 
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  size: number;
+  data: string; // base64
+}
+
 export interface EmailMessage {
   id: string;
   from: string;
@@ -13,6 +20,7 @@ export interface EmailMessage {
   text: string;
   fullText: string;
   htmlBody?: string;
+  attachments?: EmailAttachment[];
 }
 
 export type SummaryLength = "short" | "medium" | "long";
@@ -30,6 +38,7 @@ export interface EmailSummary {
   date: string;
   body?: string;
   htmlBody?: string;
+  attachments?: EmailAttachment[];
   summary: string;
   keyPoints: string[];
   sentiment: Sentiment;

@@ -20,6 +20,7 @@ model EmailSummary {
   purpose        String
   body           String?
   htmlBody       String?
+  attachments    String?  // JSON: EmailAttachment[]
   status         String   @default("New")
   fetchedAt      DateTime @default(now())
 
