@@ -318,19 +318,53 @@ export default function InboxView({
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
+                      {/* Name + time */}
                       <div className="flex items-baseline justify-between gap-1 mb-0.5">
                         <span className={`text-sm truncate ${isUnread ? "font-semibold text-gray-900" : "text-gray-600"}`}>
                           {senderName(email.from)}
                         </span>
                         <span className="text-[11px] text-gray-400 flex-shrink-0">{formatRelative(email.date)}</span>
                       </div>
-                      <p className={`text-xs truncate mb-1 ${isUnread ? "font-medium text-gray-800" : "text-gray-500"}`}>
+
+                      {/* Sender email address */}
+                      <p className="text-[11px] text-gray-400 truncate mb-1">{senderEmail(email.from)}</p>
+
+                      {/* Subject */}
+                      <p className={`text-xs truncate mb-2 ${isUnread ? "font-semibold text-gray-800" : "font-medium text-gray-600"}`}>
                         {email.subject || "(No Subject)"}
                       </p>
-                      <p className="text-[11px] text-gray-400 line-clamp-1">{email.summary}</p>
+
+                      {/* AI Summary — up to 3 lines */}
+                      <p className="text-[11px] text-gray-500 line-clamp-3 leading-relaxed mb-2">
+                        {email.summary}
+                      </p>
+
+                      {/* Key points as chips */}
+                      {email.keyPoints.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {email.keyPoints.slice(0, 4).map((pt, i) => (
+                            <span key={i} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium leading-tight max-w-[160px] truncate">
+                              {pt}
+                            </span>
+                          ))}
+                          {email.keyPoints.length > 4 && (
+                            <span className="text-[10px] text-gray-400 py-0.5">+{email.keyPoints.length - 4} more</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* PDF summary indicator */}
+                      {email.attachmentSummary && (
+                        <p className="text-[10px] text-amber-600 font-medium mb-1.5 flex items-center gap-1">
+                          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          PDF summary available
+                        </p>
+                      )}
 
                       {/* Tags row */}
-                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ring-inset ${CATEGORY_BADGE[email.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
                           {email.category}
                         </span>
