@@ -152,6 +152,27 @@ export default function InboxView({
   const [filterStatus, setFilterStatus] = useState("");
   const [selected, setSelected] = useState<EmailSummary | null>(null);
   const [detailTab, setDetailTab] = useState<"summary" | "email">("summary");
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfMessage, setPdfMessage] = useState<string | null>(null);
+
+  async function generatePdfSummaries() {
+    setIsGeneratingPdf(true);
+    setPdfMessage(null);
+    try {
+      const res = await fetch("/api/email/pdf-summaries", { method: "POST" });
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed");
+      setPdfMessage(
+        data.processed > 0
+          ? `PDF summaries generated for ${data.processed} of ${data.total} email${data.total !== 1 ? "s" : ""} — refresh to see them`
+          : "No PDF attachments found in cached emails"
+      );
+    } catch (err) {
+      setPdfMessage(err instanceof Error ? err.message : "Failed to generate PDF summaries");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  }
 
   const filtered = useMemo(() => summaries.filter((s) => {
     if (filterCategory && s.category !== filterCategory) return false;
@@ -185,6 +206,16 @@ export default function InboxView({
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">
+
+      {/* PDF summary feedback banner */}
+      {pdfMessage && (
+        <div className="px-4 pt-3 flex-shrink-0">
+          <div className="flex items-center justify-between bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2">
+            <span>{pdfMessage}</span>
+            <button onClick={() => setPdfMessage(null)} className="ml-4 text-amber-400 hover:text-amber-600">✕</button>
+          </div>
+        </div>
+      )}
 
       {/* ── Toolbar ─────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex-shrink-0">
@@ -238,10 +269,24 @@ export default function InboxView({
                 {unreadCount} unread
               </span>
             )}
-            {/* Re-sync All: clears DB and re-processes everything so attachment summaries are generated */}
+            {/* Generate PDF Summaries for already-cached emails */}
+            <button
+              onClick={generatePdfSummaries} disabled={isGeneratingPdf || isLoading}
+              title="Generate AI summaries for PDF attachments in cached emails (no IMAP needed)"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-700 text-sm font-medium transition-colors"
+            >
+              {isGeneratingPdf
+                ? <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+              }
+              <span className="hidden sm:inline">{isGeneratingPdf ? "Generating…" : "PDF Summaries"}</span>
+            </button>
+            {/* Re-sync All */}
             <button
               onClick={onClearAndResync} disabled={isLoading}
-              title="Clear all cached summaries and re-sync from scratch — regenerates PDF AI summaries"
+              title="Clear all cached summaries and re-sync from scratch"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 disabled:opacity-50 text-gray-600 text-sm font-medium transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

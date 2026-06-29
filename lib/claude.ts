@@ -155,6 +155,31 @@ export async function summarizeEmails(
   return results.flat();
 }
 
+export async function summarizePdfAttachment(
+  subject: string,
+  from: string,
+  pdfTexts: string[]
+): Promise<string | null> {
+  const prompt = `You are analyzing a PDF attachment from an email.
+
+Email Subject: ${subject}
+From: ${from}
+PDF Content:
+${pdfTexts.map((t, i) => `Attachment ${i + 1}:\n${t}`).join("\n\n")}
+
+Summarize what this PDF contains. Start with "In this PDF, we have a [document type] that contains:" then describe the key contents — candidate experience, skills, education, figures, names, dates, totals, decisions — whatever is actually present. Be specific and factual. Write 3-5 sentences.
+
+Respond with ONLY the summary text, no JSON, no markdown.`;
+
+  const message = await getClient().chat.completions.create({
+    model: "meta-llama/llama-3.3-70b-instruct",
+    max_tokens: 400,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  return message.choices[0]?.message?.content?.trim() ?? null;
+}
+
 export async function evaluateCandidate(
   emailSummary: string,
   keyPoints: string[],
