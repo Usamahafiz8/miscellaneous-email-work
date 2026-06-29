@@ -39,6 +39,7 @@ export interface EmailSummary {
   body?: string;
   htmlBody?: string;
   attachments?: EmailAttachment[];
+  attachmentSummary?: string;
   summary: string;
   keyPoints: string[];
   sentiment: Sentiment;

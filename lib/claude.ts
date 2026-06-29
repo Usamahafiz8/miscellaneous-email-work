@@ -46,6 +46,11 @@ Subject: ${e.subject}
 Body: ${body}${attachmentSection}`;
   }).join("\n\n");
 
+  const hasAttachments = attachmentTexts && attachmentTexts.size > 0;
+  const attachmentSummaryField = hasAttachments
+    ? `\n    "attachmentSummary": "2-3 sentence summary of what the PDF attachment contains (null if no attachment).",`
+    : `\n    "attachmentSummary": null,`;
+
   return `You are analyzing business emails for a company dashboard. Analyze ALL emails below and respond ONLY with a valid JSON array — no markdown, no code blocks.
 
 ${emailBlocks}
@@ -54,19 +59,20 @@ Return exactly this JSON array with one object per email in the same order:
 [
   {
     "emailId": "<the ID from the email block>",
-    "summary": "${sentences}-sentence plain-English summary",
+    "summary": "${sentences}-sentence plain-English summary of the email body",
     "keyPoints": ["key point 1", "key point 2", "key point 3"],
     "sentiment": "positive|neutral|negative",
     "category": "Hiring|Client Support|Sales|Finance|Internal|Marketing|Technical|General",
     "priority": "Critical|High|Medium|Low",
     "actionRequired": "Yes|No",
-    "purpose": "short label e.g. Job Application, Meeting Request, Invoice, Newsletter"
+    "purpose": "short label e.g. Job Application, Meeting Request, Invoice, Newsletter",${attachmentSummaryField}
   }
 ]
 
 Category rules: Hiring=resumes/applications, Client Support=customer issues, Sales=proposals/leads, Finance=invoices/payments, Internal=team comms/HR, Marketing=campaigns/promos, Technical=system alerts/IT, General=everything else
 Priority rules: Critical=server down/urgent legal, High=client awaiting reply/urgent meetings, Medium=standard correspondence, Low=newsletters/notifications
-actionRequired: Yes=needs human response/action, No=informational only`;
+actionRequired: Yes=needs human response/action, No=informational only
+attachmentSummary: summarize what the PDF actually contains (key info, figures, names). Set to null if no attachment content was provided.`;
 }
 
 function safeParseJSON(text: string) {
@@ -123,6 +129,9 @@ async function summarizeChunk(
       priority: VALID_PRIORITIES.includes(item.priority as Priority) ? (item.priority as Priority) : "Medium",
       actionRequired: VALID_ACTIONS.includes(item.actionRequired as ActionRequired) ? (item.actionRequired as ActionRequired) : "No",
       purpose: String(item.purpose ?? "General Email"),
+      attachmentSummary: item.attachmentSummary && item.attachmentSummary !== "null"
+        ? String(item.attachmentSummary)
+        : undefined,
       status: "New",
       fetchedAt: new Date().toISOString(),
     };

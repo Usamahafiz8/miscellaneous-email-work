@@ -4,6 +4,7 @@ import type { EmailSummary, EmailAttachment } from "./types";
 function toEmailSummary(row: {
   emailId: string; from: string; subject: string; date: string;
   body: string | null; htmlBody: string | null; attachments: string | null;
+  attachmentSummary?: string | null;
   summary: string; keyPoints: string[];
   sentiment: string; category: string; priority: string;
   actionRequired: string; purpose: string; status: string; fetchedAt: Date;
@@ -20,6 +21,7 @@ function toEmailSummary(row: {
     body: row.body ?? undefined,
     htmlBody: row.htmlBody ?? undefined,
     attachments,
+    attachmentSummary: row.attachmentSummary ?? undefined,
     summary: row.summary,
     keyPoints: row.keyPoints,
     sentiment: row.sentiment as EmailSummary["sentiment"],
@@ -80,6 +82,7 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
           priority: s.priority,
           actionRequired: s.actionRequired,
           purpose: s.purpose,
+          attachmentSummary: s.attachmentSummary ?? null,
         },
         create: {
           emailId: s.emailId,
@@ -89,6 +92,7 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
           body: s.body ?? null,
           htmlBody: s.htmlBody ?? null,
           attachments: s.attachments ? JSON.stringify(s.attachments) : null,
+          attachmentSummary: s.attachmentSummary ?? null,
           summary: s.summary,
           keyPoints: s.keyPoints,
           sentiment: s.sentiment,

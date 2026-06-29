@@ -20,8 +20,9 @@ model EmailSummary {
   purpose        String
   body           String?
   htmlBody       String?
-  attachments    String?  // JSON: EmailAttachment[]
-  status         String   @default("New")
+  attachments       String?  // JSON: EmailAttachment[]
+  attachmentSummary String?  // AI-generated summary of PDF attachment content
+  status            String   @default("New")
   fetchedAt      DateTime @default(now())
 
   @@map("email_summaries")
