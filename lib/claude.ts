@@ -1,4 +1,5 @@
 import Groq from "groq-sdk";
+import { extractPdfText } from "@/lib/pdf";
 import type {
   EmailMessage, EmailSummary, SummaryLength,
   Category, Priority, ActionRequired, Sentiment,
@@ -22,17 +23,23 @@ const VALID_ACTIONS: ActionRequired[] = ["Yes", "No"];
 
 function buildBatchPrompt(
   emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText">[],
-  length: SummaryLength
+  length: SummaryLength,
+  attachmentTexts?: Map<string, string[]>
 ): string {
   const sentences = length === "short" ? "2-3" : length === "medium" ? "3-4" : "5-6";
 
-  const emailBlocks = emails.map((e, i) =>
-    `--- Email ${i + 1} ---
+  const emailBlocks = emails.map((e, i) => {
+    const body = e.fullText.slice(0, BODY_LIMIT) + (e.fullText.length > BODY_LIMIT ? "..." : "");
+    const texts = attachmentTexts?.get(e.id);
+    const attachmentSection = texts?.length
+      ? "\n" + texts.map((t, j) => `Attachment ${j + 1} content: ${t}`).join("\n")
+      : "";
+    return `--- Email ${i + 1} ---
 ID: ${e.id}
 From: ${e.from}
 Subject: ${e.subject}
-Body: ${e.fullText.slice(0, BODY_LIMIT)}${e.fullText.length > BODY_LIMIT ? "..." : ""}`
-  ).join("\n\n");
+Body: ${body}${attachmentSection}`;
+  }).join("\n\n");
 
   return `You are analyzing business emails for a company dashboard. Analyze ALL emails below and respond ONLY with a valid JSON array — no markdown, no code blocks.
 
@@ -66,10 +73,25 @@ async function summarizeChunk(
   emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody" | "attachments">[],
   summaryLength: SummaryLength
 ): Promise<EmailSummary[]> {
+  // Extract text from PDF attachments in parallel before building the prompt
+  const attachmentTexts = new Map<string, string[]>();
+  await Promise.all(
+    emails.map(async (e) => {
+      if (!e.attachments?.length) return;
+      const texts = await Promise.all(
+        e.attachments.map((a) =>
+          extractPdfText(a.data).catch(() => "")
+        )
+      );
+      const nonEmpty = texts.filter(Boolean);
+      if (nonEmpty.length) attachmentTexts.set(e.id, nonEmpty);
+    })
+  );
+
   const message = await getClient().chat.completions.create({
     model: "llama-3.3-70b-versatile",
     max_tokens: MAX_TOKENS[summaryLength],
-    messages: [{ role: "user", content: buildBatchPrompt(emails, summaryLength) }],
+    messages: [{ role: "user", content: buildBatchPrompt(emails, summaryLength, attachmentTexts) }],
   });
 
   const text = message.choices[0]?.message?.content;
