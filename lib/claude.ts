@@ -1,4 +1,4 @@
-import Groq from "groq-sdk";
+import OpenAI from "openai";
 import { extractPdfText } from "@/lib/pdf";
 import type {
   EmailMessage, EmailSummary, SummaryLength,
@@ -6,9 +6,14 @@ import type {
   HiringCriteria, CandidateEvaluation,
 } from "./types";
 
-let _client: Groq | null = null;
-function getClient(): Groq {
-  if (!_client) _client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) {
+    _client = new OpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseURL: "https://openrouter.ai/api/v1",
+    });
+  }
   return _client;
 }
 
@@ -89,7 +94,7 @@ async function summarizeChunk(
   );
 
   const message = await getClient().chat.completions.create({
-    model: "llama-3.3-70b-versatile",
+    model: "meta-llama/llama-3.3-70b-instruct",
     max_tokens: MAX_TOKENS[summaryLength],
     messages: [{ role: "user", content: buildBatchPrompt(emails, summaryLength, attachmentTexts) }],
   });
@@ -163,7 +168,7 @@ Analyze whether this candidate meets the requirements. Respond ONLY with valid J
 }`;
 
   const message = await getClient().chat.completions.create({
-    model: "llama-3.3-70b-versatile",
+    model: "meta-llama/llama-3.3-70b-instruct",
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],
   });
