@@ -54,6 +54,36 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Clear DB then re-sync everything — forces re-generation of attachment summaries
+  const clearAndResync = useCallback(async () => {
+    setIsSyncing(true);
+    setSyncMessage(null);
+    setError(null);
+    setSummaries([]);
+    try {
+      const del = await fetch("/api/summaries", { method: "DELETE" });
+      if (!del.ok) throw new Error("Failed to clear summaries");
+      const res = await fetch("/api/email/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset: 0 }),
+      });
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
+      const incoming: EmailSummary[] = data.summaries ?? [];
+      setSummaries(incoming);
+      setStatusOverrides(new Map());
+      setTotalCount(data.totalCount ?? 0);
+      setNextOffset(incoming.length);
+      setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      setSyncMessage(`Re-synced ${incoming.length} email${incoming.length !== 1 ? "s" : ""} with fresh AI summaries`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
   // Sync from IMAP — runs AI only for emails not in DB yet
   const syncEmails = useCallback(async () => {
     setIsSyncing(true);
@@ -157,6 +187,7 @@ export default function Dashboard() {
               hasMore={hasMore}
               totalCount={totalCount}
               onFetch={syncEmails}
+              onClearAndResync={clearAndResync}
               onLoadMore={loadMore}
               onStatusChange={handleStatusChange}
             />
