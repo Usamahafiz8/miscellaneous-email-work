@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import type { EmailSummary, HiringCriteria, CandidateEvaluation, EmailAttachment } from "@/lib/types";
 
 interface HiringViewProps {
@@ -64,13 +64,23 @@ function gradient(str: string) {
   return GRADIENTS[h % GRADIENTS.length];
 }
 
-const CHIP_COLORS = [
-  "bg-violet-50 text-violet-700 ring-violet-200",
-  "bg-blue-50 text-blue-700 ring-blue-200",
-  "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  "bg-amber-50 text-amber-700 ring-amber-200",
-  "bg-rose-50 text-rose-700 ring-rose-200",
-  "bg-cyan-50 text-cyan-700 ring-cyan-200",
+
+const POINT_BADGE = [
+  "bg-violet-100 text-violet-700",
+  "bg-blue-100 text-blue-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+  "bg-cyan-100 text-cyan-700",
+];
+
+const POINT_BORDER = [
+  "border-l-violet-400",
+  "border-l-blue-400",
+  "border-l-emerald-400",
+  "border-l-amber-400",
+  "border-l-rose-400",
+  "border-l-cyan-400",
 ];
 
 // ─── Tag input ───────────────────────────────────────────────────────────────
@@ -167,11 +177,52 @@ function PdfViewer({ attachment }: { attachment: EmailAttachment }) {
 export default function HiringView({ summaries, isLoading, onFetch }: HiringViewProps) {
   const [criteria, setCriteria] = useState<HiringCriteria>({ position: "", mandatory: [], optional: [] });
   const [criteriaOpen, setCriteriaOpen] = useState(true);
+  const [filterActive, setFilterActive] = useState(false);
   const [evaluations, setEvaluations] = useState<Map<string, EvalState>>(new Map());
   const [selected, setSelected] = useState<EmailSummary | null>(null);
   const [detailTab, setDetailTab] = useState<"insights" | "email">("insights");
 
   const hasCriteria = !!(criteria.position.trim() && criteria.mandatory.length > 0);
+
+  // Per-candidate keyword relevance against current criteria (runs client-side, instant)
+  function kwScore(email: EmailSummary): { mand: number; opt: number } {
+    if (!hasCriteria) return { mand: 0, opt: 0 };
+    const text = [email.summary, email.subject, ...email.keyPoints].join(" ").toLowerCase();
+    const mand = criteria.mandatory.filter(r => text.includes(r.toLowerCase())).length;
+    const opt  = criteria.optional.filter(r => text.includes(r.toLowerCase())).length;
+    return { mand, opt };
+  }
+
+  // Sorted + optionally filtered candidate list
+  const visibleCandidates = useMemo(() => {
+    const getText = (e: EmailSummary) =>
+      [e.summary, e.subject, ...e.keyPoints].join(" ").toLowerCase();
+
+    const mandHits = (e: EmailSummary) =>
+      hasCriteria ? criteria.mandatory.filter(r => getText(e).includes(r.toLowerCase())).length : 0;
+    const optHits  = (e: EmailSummary) =>
+      hasCriteria ? criteria.optional.filter(r => getText(e).includes(r.toLowerCase())).length : 0;
+
+    const sorted = [...summaries].sort((a, b) => {
+      const ea = evaluations.get(a.emailId)?.result;
+      const eb = evaluations.get(b.emailId)?.result;
+      if (ea && eb) return eb.matchScore - ea.matchScore;
+      if (ea) return -1;
+      if (eb) return 1;
+      const relA = mandHits(a) * 10 + optHits(a);
+      const relB = mandHits(b) * 10 + optHits(b);
+      if (relA !== relB) return relB - relA;
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+
+    if (!filterActive || !hasCriteria) return sorted;
+
+    return sorted.filter(e => {
+      const ev = evaluations.get(e.emailId)?.result;
+      if (ev) return ev.matchScore >= 30;
+      return mandHits(e) > 0;
+    });
+  }, [summaries, evaluations, criteria, filterActive, hasCriteria]);
 
   const selectedEmail = selected
     ? (summaries.find(s => s.emailId === selected.emailId) ?? selected)
@@ -274,6 +325,32 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
             )}
           </div>
 
+          {/* Candidate list header — filter toggle */}
+          {summaries.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0">
+              <span className="text-[11px] text-gray-400">
+                {hasCriteria
+                  ? filterActive
+                    ? `${visibleCandidates.length} of ${summaries.length} match`
+                    : `${summaries.length} candidate${summaries.length !== 1 ? "s" : ""} · sorted by fit`
+                  : `${summaries.length} candidate${summaries.length !== 1 ? "s" : ""}`}
+              </span>
+              {hasCriteria && (
+                <button onClick={() => setFilterActive(f => !f)}
+                  className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full transition-colors ${
+                    filterActive
+                      ? "bg-violet-600 text-white"
+                      : "bg-gray-100 text-gray-500 hover:bg-violet-50 hover:text-violet-600"
+                  }`}>
+                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 4h18M6 8h12M9 12h6M11 16h2" />
+                  </svg>
+                  {filterActive ? "Matching only" : "Filter"}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Candidate list */}
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
             {summaries.length === 0 ? (
@@ -284,12 +361,22 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
                 <p className="text-sm">No hiring emails found</p>
                 <button onClick={onFetch} className="text-sm font-medium text-violet-600 hover:text-violet-700">Sync inbox →</button>
               </div>
+            ) : visibleCandidates.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-gray-400 gap-2 px-6 text-center">
+                <svg className="w-8 h-8 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <p className="text-sm">No candidates match these criteria</p>
+                <button onClick={() => setFilterActive(false)} className="text-xs font-medium text-violet-600 hover:text-violet-700">Show all →</button>
+              </div>
             ) : (
-              summaries.map(email => {
+              visibleCandidates.map(email => {
                 const sender = parseSender(email.from);
                 const evalState = evaluations.get(email.emailId);
-                const result = evalState ? evalState.result : null;
+                const result = evalState?.result ?? null;
                 const isSelected = selectedEmail?.emailId === email.emailId;
+                const kw = kwScore(email);
+                const hasKwMatch = hasCriteria && !result && (kw.mand > 0 || kw.opt > 0);
 
                 return (
                   <button key={email.emailId} onClick={() => handleSelect(email)}
@@ -308,16 +395,30 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
                       <p className="text-xs text-gray-500 truncate mb-1">{email.subject || "(No Subject)"}</p>
                       <p className="text-[11px] text-gray-400 line-clamp-1">{email.summary}</p>
                       <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        {/* AI match score */}
+                        {result ? (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                            result.recommendation === "Yes" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"
+                          }`}>
+                            {result.matchScore}% match
+                          </span>
+                        ) : null}
+                        {/* Keyword match (before AI eval) */}
+                        {hasKwMatch ? (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600">
+                            {kw.mand}/{criteria.mandatory.length} req
+                            {kw.opt > 0 ? ` +${kw.opt}` : ""}
+                          </span>
+                        ) : null}
+                        {/* No keyword match when criteria set */}
+                        {hasCriteria && !result && !hasKwMatch ? (
+                          <span className="text-[10px] text-gray-300">no keyword match</span>
+                        ) : null}
                         {email.priority === "High" || email.priority === "Critical"
                           ? <span className="text-[10px] font-semibold text-red-500">{email.priority}</span>
                           : null}
                         {email.actionRequired === "Yes"
                           ? <span className="text-[10px] font-semibold text-amber-600">⚡ Action</span>
-                          : null}
-                        {result
-                          ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${result.recommendation === "Yes" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
-                              {result.matchScore}% match
-                            </span>
                           : null}
                         {(email.attachments?.length ?? 0) > 0
                           ? <span className="text-[10px] text-gray-400">📎 {email.attachments!.length}</span>
@@ -448,41 +549,73 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
 
                   {detailTab === "insights" && (
                     <>
-                      {/* AI Summary */}
-                      <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-100">
-                        <div className="flex items-center gap-2 mb-3">
+                      {/* AI Summary — rendered as numbered bullet points */}
+                      <div className="rounded-xl border border-indigo-100 overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-3 bg-indigo-50 border-b border-indigo-100">
                           <svg className="w-4 h-4 text-indigo-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                           </svg>
-                          <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">AI Summary</span>
+                          <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">AI Summary</span>
                         </div>
-                        <p className="text-sm text-gray-700 leading-relaxed">{selectedEmail.summary}</p>
+                        <ul className="bg-white divide-y divide-indigo-50">
+                          {selectedEmail.summary
+                            .split(/(?<=[.!?])\s+/)
+                            .map(s => s.trim())
+                            .filter(s => s.length > 10)
+                            .map((sentence, i) => (
+                              <li key={i} className="flex items-start gap-3 px-4 py-3">
+                                <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">
+                                  {i + 1}
+                                </span>
+                                <span className="text-sm text-gray-700 leading-relaxed">{sentence}</span>
+                              </li>
+                            ))}
+                        </ul>
                       </div>
 
-                      {/* Key Points */}
+                      {/* Key Highlights — colored bordered list */}
                       {selectedEmail.keyPoints.length > 0 && (
-                        <div>
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-3">Highlights</p>
-                          <div className="flex flex-wrap gap-2">
-                            {selectedEmail.keyPoints.map((pt, i) => (
-                              <span key={i} className={`text-xs px-3 py-1.5 rounded-full font-medium ring-1 ring-inset ${CHIP_COLORS[i % CHIP_COLORS.length]}`}>
-                                {pt}
-                              </span>
-                            ))}
+                        <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+                          <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                            <svg className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Key Highlights</p>
                           </div>
+                          <ul className="divide-y divide-gray-100">
+                            {selectedEmail.keyPoints.map((pt, i) => (
+                              <li key={i} className={`flex items-start gap-3 px-4 py-3 border-l-4 ${POINT_BORDER[i % POINT_BORDER.length]}`}>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 min-w-[22px] text-center ${POINT_BADGE[i % POINT_BADGE.length]}`}>
+                                  {i + 1}
+                                </span>
+                                <span className="text-sm text-gray-800 font-medium leading-snug">{pt}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )}
 
                       {/* PDF Attachment Summary */}
                       {selectedEmail.attachmentSummary && (
-                        <div className="bg-amber-50 rounded-xl p-4 border border-amber-100">
-                          <div className="flex items-center gap-2 mb-3">
+                        <div className="rounded-xl border border-amber-100 overflow-hidden">
+                          <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
                             <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                             </svg>
-                            <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">PDF / Attachment Summary</span>
+                            <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">PDF / Attachment Summary</span>
                           </div>
-                          <p className="text-sm text-gray-700 leading-relaxed">{selectedEmail.attachmentSummary}</p>
+                          <ul className="bg-white divide-y divide-amber-50">
+                            {selectedEmail.attachmentSummary
+                              .split(/(?<=[.!?])\s+/)
+                              .map(s => s.trim())
+                              .filter(s => s.length > 10)
+                              .map((sentence, i) => (
+                                <li key={i} className="flex items-start gap-3 px-4 py-3">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0 mt-2" />
+                                  <span className="text-sm text-gray-700 leading-relaxed">{sentence}</span>
+                                </li>
+                              ))}
+                          </ul>
                         </div>
                       )}
 

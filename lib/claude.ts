@@ -17,9 +17,9 @@ function getClient(): OpenAI {
   return _client;
 }
 
-const MAX_TOKENS: Record<SummaryLength, number> = { short: 1500, medium: 2000, long: 3000 };
-const BODY_LIMIT = 400;  // chars per email in the batch prompt
-const CHUNK_SIZE = 10;   // emails per API call
+const MAX_TOKENS: Record<SummaryLength, number> = { short: 1800, medium: 2400, long: 3200 };
+const BODY_LIMIT = 800;  // chars per email in the batch prompt
+const CHUNK_SIZE = 8;    // emails per API call
 
 const VALID_SENTIMENTS: Sentiment[] = ["positive", "neutral", "negative"];
 const VALID_CATEGORIES: Category[] = ["Hiring", "Client Support", "Sales", "Finance", "Internal", "Marketing", "Technical", "General"];
@@ -31,7 +31,7 @@ function buildBatchPrompt(
   length: SummaryLength,
   attachmentTexts?: Map<string, string[]>
 ): string {
-  const sentences = length === "short" ? "2-3" : length === "medium" ? "3-4" : "5-6";
+  const sentences = length === "short" ? "4-5" : length === "medium" ? "5-7" : "7-9";
 
   const emailBlocks = emails.map((e, i) => {
     const body = e.fullText.slice(0, BODY_LIMIT) + (e.fullText.length > BODY_LIMIT ? "..." : "");
@@ -48,7 +48,7 @@ Body: ${body}${attachmentSection}`;
 
   const hasAttachments = attachmentTexts && attachmentTexts.size > 0;
   const attachmentSummaryField = hasAttachments
-    ? `\n    "attachmentSummary": "2-3 sentence summary of what the PDF attachment contains (null if no attachment).",`
+    ? `\n    "attachmentSummary": "Start with 'In this PDF, we have a [document type] that contains:' then list the key contents, figures, candidate details, or important data found inside. 3-5 sentences. Null if no attachment.",`
     : `\n    "attachmentSummary": null,`;
 
   return `You are analyzing business emails for a company dashboard. Analyze ALL emails below and respond ONLY with a valid JSON array — no markdown, no code blocks.
@@ -60,7 +60,7 @@ Return exactly this JSON array with one object per email in the same order:
   {
     "emailId": "<the ID from the email block>",
     "summary": "${sentences}-sentence plain-English summary of the email body",
-    "keyPoints": ["key point 1", "key point 2", "key point 3"],
+    "keyPoints": ["key point 1", "key point 2", "key point 3", "key point 4", "key point 5"],
     "sentiment": "positive|neutral|negative",
     "category": "Hiring|Client Support|Sales|Finance|Internal|Marketing|Technical|General",
     "priority": "Critical|High|Medium|Low",
@@ -72,7 +72,8 @@ Return exactly this JSON array with one object per email in the same order:
 Category rules: Hiring=resumes/applications, Client Support=customer issues, Sales=proposals/leads, Finance=invoices/payments, Internal=team comms/HR, Marketing=campaigns/promos, Technical=system alerts/IT, General=everything else
 Priority rules: Critical=server down/urgent legal, High=client awaiting reply/urgent meetings, Medium=standard correspondence, Low=newsletters/notifications
 actionRequired: Yes=needs human response/action, No=informational only
-attachmentSummary: summarize what the PDF actually contains (key info, figures, names). Set to null if no attachment content was provided.`;
+keyPoints rules: Extract the most important, specific facts. For hiring emails: years of experience, skills, role applied for, education, notable achievements, availability, expected salary. For other emails: action items, deadlines, amounts, decisions, people mentioned. Each point must be a complete, self-contained fact (not vague like "good candidate"). Aim for 5 points minimum.
+attachmentSummary: Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual. Set to null if no attachment content was provided.`;
 }
 
 function safeParseJSON(text: string) {
@@ -123,7 +124,7 @@ async function summarizeChunk(
       htmlBody: original?.htmlBody ?? undefined,
       attachments: original?.attachments,
       summary: String(item.summary ?? ""),
-      keyPoints: Array.isArray(item.keyPoints) ? (item.keyPoints as string[]).slice(0, 5) : [],
+      keyPoints: Array.isArray(item.keyPoints) ? (item.keyPoints as string[]).slice(0, 8) : [],
       sentiment: VALID_SENTIMENTS.includes(item.sentiment as Sentiment) ? (item.sentiment as Sentiment) : "neutral",
       category: VALID_CATEGORIES.includes(item.category as Category) ? (item.category as Category) : "General",
       priority: VALID_PRIORITIES.includes(item.priority as Priority) ? (item.priority as Priority) : "Medium",
@@ -144,13 +145,14 @@ export async function summarizeEmails(
 ): Promise<EmailSummary[]> {
   if (emails.length === 0) return [];
 
-  const results: EmailSummary[] = [];
+  const chunks: typeof emails[] = [];
   for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
-    const chunk = emails.slice(i, i + CHUNK_SIZE);
-    const summaries = await summarizeChunk(chunk, summaryLength);
-    results.push(...summaries);
+    chunks.push(emails.slice(i, i + CHUNK_SIZE));
   }
-  return results;
+
+  // All chunks run in parallel — wall-clock time = slowest single chunk, not sum of all
+  const results = await Promise.all(chunks.map(chunk => summarizeChunk(chunk, summaryLength)));
+  return results.flat();
 }
 
 export async function evaluateCandidate(

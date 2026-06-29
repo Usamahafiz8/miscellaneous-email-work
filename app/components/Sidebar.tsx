@@ -10,7 +10,6 @@ interface SidebarProps {
   hiringCount: number;
   collapsed: boolean;
   onToggle: () => void;
-  onCompose: () => void;
 }
 
 const NAV: { id: NavView; label: string; badge?: "unread" | "hiring"; icon: JSX.Element }[] = [
@@ -32,7 +31,7 @@ const NAV: { id: NavView; label: string; badge?: "unread" | "hiring"; icon: JSX.
   },
 ];
 
-export default function Sidebar({ active, onChange, emailCount, unreadCount, hiringCount, collapsed, onToggle, onCompose }: SidebarProps) {
+export default function Sidebar({ active, onChange, emailCount, unreadCount, hiringCount, collapsed, onToggle }: SidebarProps) {
   return (
     <aside className={`${collapsed ? "w-[60px]" : "w-56"} flex-shrink-0 bg-[#0f172a] flex flex-col transition-all duration-200 ease-in-out overflow-hidden border-r border-white/[0.04]`}>
 
@@ -49,21 +48,6 @@ export default function Sidebar({ active, onChange, emailCount, unreadCount, hir
             <p className="text-indigo-400 text-[10px] tracking-wider">Smart Inbox</p>
           </div>
         )}
-      </div>
-
-      {/* Compose */}
-      <div className="px-3 pb-3 flex-shrink-0">
-        <button
-          onClick={onCompose}
-          title={collapsed ? "Compose" : undefined}
-          className={`w-full flex items-center gap-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white transition-colors font-medium text-sm shadow-sm shadow-indigo-900/40
-            ${collapsed ? "justify-center p-2.5" : "px-3.5 py-2.5"}`}
-        >
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-          </svg>
-          {!collapsed && <span>Compose</span>}
-        </button>
       </div>
 
       <div className="mx-3 mb-1 h-px bg-white/[0.06]" />

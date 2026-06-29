@@ -146,7 +146,6 @@ export default function Dashboard() {
         hiringCount={hiringEmails.length}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((c) => !c)}
-        onCompose={() => setActiveNav("inbox")}
       />
 
       {/* Main content */}
