@@ -388,13 +388,49 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
                     </div>
                     {/* Content */}
                     <div className="flex-1 min-w-0">
+                      {/* Name + time */}
                       <div className="flex items-baseline justify-between gap-1 mb-0.5">
                         <span className="text-sm font-semibold text-gray-900 truncate">{sender.name}</span>
                         <span className="text-[11px] text-gray-400 flex-shrink-0">{formatRelative(email.date)}</span>
                       </div>
-                      <p className="text-xs text-gray-500 truncate mb-1">{email.subject || "(No Subject)"}</p>
-                      <p className="text-[11px] text-gray-400 line-clamp-1">{email.summary}</p>
-                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+
+                      {/* Sender email */}
+                      {sender.email && (
+                        <p className="text-[11px] text-gray-400 truncate mb-1">{sender.email}</p>
+                      )}
+
+                      {/* Subject */}
+                      <p className="text-xs font-medium text-gray-600 truncate mb-2">{email.subject || "(No Subject)"}</p>
+
+                      {/* AI Summary — up to 3 lines */}
+                      <p className="text-[11px] text-gray-500 line-clamp-3 leading-relaxed mb-2">{email.summary}</p>
+
+                      {/* Key points as chips */}
+                      {email.keyPoints.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {email.keyPoints.slice(0, 4).map((pt, i) => (
+                            <span key={i} className="text-[10px] bg-violet-50 text-violet-600 px-2 py-0.5 rounded-full font-medium max-w-[150px] truncate">
+                              {pt}
+                            </span>
+                          ))}
+                          {email.keyPoints.length > 4 && (
+                            <span className="text-[10px] text-gray-400 py-0.5">+{email.keyPoints.length - 4} more</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* PDF summary indicator */}
+                      {email.attachmentSummary && (
+                        <p className="text-[10px] text-amber-600 font-medium mb-1.5 flex items-center gap-1">
+                          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          PDF summary available
+                        </p>
+                      )}
+
+                      {/* Tags row */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         {/* AI match score */}
                         {result ? (
                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
@@ -410,7 +446,6 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
                             {kw.opt > 0 ? ` +${kw.opt}` : ""}
                           </span>
                         ) : null}
-                        {/* No keyword match when criteria set */}
                         {hasCriteria && !result && !hasKwMatch ? (
                           <span className="text-[10px] text-gray-300">no keyword match</span>
                         ) : null}
