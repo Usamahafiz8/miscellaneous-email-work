@@ -6,6 +6,8 @@ node_modules/
 out/
 
 # Environment
+.env
+.env.local
 .env.*.local
 
 # Build
@@ -15,9 +17,10 @@ build/
 # Misc
 .DS_Store
 *.tsbuildinfo
+config.bat
 
 # Persisted email summaries
 .email-summaries.json
 
 /lib/generated/prisma
-config.bat
+.vercel

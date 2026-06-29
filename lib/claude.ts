@@ -5,7 +5,11 @@ import type {
   HiringCriteria, CandidateEvaluation,
 } from "./types";
 
-const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+let _client: Groq | null = null;
+function getClient(): Groq {
+  if (!_client) _client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  return _client;
+}
 
 const MAX_TOKENS: Record<SummaryLength, number> = { short: 1500, medium: 2000, long: 3000 };
 const BODY_LIMIT = 400;  // chars per email in the batch prompt
@@ -62,7 +66,7 @@ async function summarizeChunk(
   emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody" | "attachments">[],
   summaryLength: SummaryLength
 ): Promise<EmailSummary[]> {
-  const message = await client.chat.completions.create({
+  const message = await getClient().chat.completions.create({
     model: "llama-3.3-70b-versatile",
     max_tokens: MAX_TOKENS[summaryLength],
     messages: [{ role: "user", content: buildBatchPrompt(emails, summaryLength) }],
@@ -136,7 +140,7 @@ Analyze whether this candidate meets the requirements. Respond ONLY with valid J
   "reasoning": "2-3 sentence explanation of match score and recommendation"
 }`;
 
-  const message = await client.chat.completions.create({
+  const message = await getClient().chat.completions.create({
     model: "llama-3.3-70b-versatile",
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],

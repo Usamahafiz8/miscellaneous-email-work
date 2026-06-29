@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ["imap", "mailparser"],
+  experimental: {
+    serverComponentsExternalPackages: ["imap", "mailparser"],
+  },
 };
 
 export default nextConfig;
