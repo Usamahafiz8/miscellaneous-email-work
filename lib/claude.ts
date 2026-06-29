@@ -9,10 +9,9 @@ import type {
 let _client: OpenAI | null = null;
 function getClient(): OpenAI {
   if (!_client) {
-    _client = new OpenAI({
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseURL: "https://openrouter.ai/api/v1",
-    });
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
+    _client = new OpenAI({ apiKey, baseURL: "https://openrouter.ai/api/v1" });
   }
   return _client;
 }
@@ -76,9 +75,11 @@ keyPoints rules: Extract the most important, specific facts. For hiring emails: 
 attachmentSummary: Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual. Set to null if no attachment content was provided.`;
 }
 
-function safeParseJSON(text: string) {
+function safeParseJSON(text: string): Record<string, unknown>[] {
   const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-  return JSON.parse(cleaned);
+  const parsed: unknown = JSON.parse(cleaned);
+  if (!Array.isArray(parsed)) throw new Error(`AI returned non-array JSON: ${typeof parsed}`);
+  return parsed as Record<string, unknown>[];
 }
 
 async function summarizeChunk(
@@ -212,5 +213,6 @@ Analyze whether this candidate meets the requirements. Respond ONLY with valid J
   const text = message.choices[0]?.message?.content;
   if (!text) throw new Error("No text in response");
 
-  return safeParseJSON(text) as CandidateEvaluation;
+  const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+  return JSON.parse(cleaned) as CandidateEvaluation;
 }

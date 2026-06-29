@@ -70,7 +70,9 @@ export async function getSummariesByIds(ids: string[]): Promise<EmailSummary[]> 
 }
 
 export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
-  await Promise.all(
+  if (summaries.length === 0) return;
+  // Run upserts in a transaction — single round-trip to the DB instead of N parallel connections
+  await prisma.$transaction(
     summaries.map((s) =>
       prisma.emailSummary.upsert({
         where: { emailId: s.emailId },

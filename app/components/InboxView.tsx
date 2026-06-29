@@ -1,8 +1,11 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
-import type { EmailSummary, EmailStatus, Priority, EmailAttachment } from "@/lib/types";
+import { useState, useMemo, useCallback } from "react";
+import type { EmailSummary, EmailStatus, Priority } from "@/lib/types";
 import { STATUSES } from "@/lib/types";
+import { formatRelative, formatFull, parseSender, avatarColor } from "@/lib/utils";
+import PdfViewer from "./PdfViewer";
+import EmailInsightsPanel from "./EmailInsightsPanel";
 
 interface InboxViewProps {
   summaries: EmailSummary[];
@@ -16,72 +19,15 @@ interface InboxViewProps {
   onStatusChange: (emailId: string, status: EmailStatus) => void;
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-function formatRelative(iso: string) {
-  try {
-    const d = new Date(iso);
-    const diff = Date.now() - d.getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h`;
-    const days = Math.floor(hrs / 24);
-    if (days === 1) return "Yesterday";
-    if (days < 7) return `${days}d`;
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  } catch { return ""; }
-}
-
-function formatFull(iso: string) {
-  try {
-    return new Date(iso).toLocaleString("en-US", {
-      weekday: "short", month: "short", day: "numeric",
-      year: "numeric", hour: "2-digit", minute: "2-digit",
-    });
-  } catch { return ""; }
-}
-
-function senderName(from: string) {
-  const clean = from.replace(/<.*>/, "").replace(/"/g, "").trim();
-  return clean || from.split("@")[0];
-}
-
-function senderEmail(from: string) {
-  return from.match(/<(.+)>/)?.[1] ?? from;
-}
-
-function initials(from: string) {
-  const name = senderName(from);
-  const parts = name.split(" ").filter(Boolean);
-  return parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    : name.slice(0, 2).toUpperCase();
-}
-
-// Deterministic avatar color per sender
-const AVATAR_COLORS = [
-  "bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-orange-500",
-  "bg-pink-500", "bg-teal-500", "bg-amber-500", "bg-cyan-500",
-];
-function avatarColor(from: string) {
-  let hash = 0;
-  for (const c of from) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
 const PRIORITY_DOT: Record<Priority, string> = {
   Critical: "bg-red-500", High: "bg-orange-400", Medium: "bg-yellow-400", Low: "bg-green-400",
 };
-
 const PRIORITY_BADGE: Record<Priority, string> = {
   Critical: "bg-red-50 text-red-600 ring-red-200",
   High: "bg-orange-50 text-orange-600 ring-orange-200",
   Medium: "bg-yellow-50 text-yellow-700 ring-yellow-200",
   Low: "bg-green-50 text-green-700 ring-green-200",
 };
-
 const CATEGORY_BADGE: Record<string, string> = {
   Hiring: "bg-violet-50 text-violet-700 ring-violet-200",
   "Client Support": "bg-blue-50 text-blue-700 ring-blue-200",
@@ -92,52 +38,11 @@ const CATEGORY_BADGE: Record<string, string> = {
   Technical: "bg-indigo-50 text-indigo-700 ring-indigo-200",
   General: "bg-slate-100 text-slate-600 ring-slate-200",
 };
-
 const SENTIMENT_STYLE: Record<string, string> = {
   positive: "text-emerald-600 bg-emerald-50 ring-emerald-200",
   neutral: "text-gray-500 bg-gray-100 ring-gray-200",
   negative: "text-red-500 bg-red-50 ring-red-200",
 };
-
-// ─── PDF viewer ─────────────────────────────────────────────────────────────
-
-function PdfViewer({ attachment }: { attachment: EmailAttachment }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const prevUrl = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (prevUrl.current) URL.revokeObjectURL(prevUrl.current);
-    const bytes = Uint8Array.from(atob(attachment.data), (c) => c.charCodeAt(0));
-    const blob = new Blob([bytes], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    setBlobUrl(url);
-    prevUrl.current = url;
-    return () => URL.revokeObjectURL(url);
-  }, [attachment.data]);
-
-  if (!blobUrl) return null;
-  return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
-        <div className="flex items-center gap-2 min-w-0">
-          <svg className="w-4 h-4 text-red-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5z" />
-          </svg>
-          <span className="text-xs font-medium text-gray-700 truncate">{attachment.filename}</span>
-          <span className="text-[10px] text-gray-400 flex-shrink-0">({(attachment.size / 1024).toFixed(0)} KB)</span>
-        </div>
-        <a href={blobUrl} download={attachment.filename}
-          className="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 flex-shrink-0 ml-2">
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Download
-        </a>
-      </div>
-      <embed src={blobUrl} type="application/pdf" className="w-full" style={{ height: "480px" }} />
-    </div>
-  );
-}
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
@@ -154,8 +59,9 @@ export default function InboxView({
   const [detailTab, setDetailTab] = useState<"summary" | "email">("summary");
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfMessage, setPdfMessage] = useState<string | null>(null);
+  const [isResyncing, setIsResyncing] = useState(false);
 
-  async function generatePdfSummaries() {
+  const generatePdfSummaries = useCallback(async () => {
     setIsGeneratingPdf(true);
     setPdfMessage(null);
     try {
@@ -164,7 +70,7 @@ export default function InboxView({
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed");
       setPdfMessage(
         data.processed > 0
-          ? `PDF summaries generated for ${data.processed} of ${data.total} email${data.total !== 1 ? "s" : ""} — refresh to see them`
+          ? `PDF summaries generated for ${data.processed} of ${data.total} email${data.total !== 1 ? "s" : ""} — click Sync to refresh`
           : "No PDF attachments found in cached emails"
       );
     } catch (err) {
@@ -172,7 +78,26 @@ export default function InboxView({
     } finally {
       setIsGeneratingPdf(false);
     }
-  }
+  }, []);
+
+  const handleResyncEmail = useCallback(async (emailId: string) => {
+    setIsResyncing(true);
+    try {
+      const res = await fetch("/api/email/resync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailId }),
+      });
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Resync failed");
+      // Trigger a DB reload so the updated summary appears
+      onFetch();
+    } catch (err) {
+      setPdfMessage(err instanceof Error ? err.message : "Resync failed");
+    } finally {
+      setIsResyncing(false);
+    }
+  }, [onFetch]);
 
   const filtered = useMemo(() => summaries.filter((s) => {
     if (filterCategory && s.category !== filterCategory) return false;
@@ -188,10 +113,10 @@ export default function InboxView({
     return true;
   }), [summaries, search, filterCategory, filterPriority, filterAction, filterStatus]);
 
-  // Keep selected in sync when summaries update (e.g. after status change)
-  const selectedEmail = selected
-    ? (summaries.find(s => s.emailId === selected.emailId) ?? selected)
-    : null;
+  const selectedEmail = useMemo(
+    () => selected ? (summaries.find(s => s.emailId === selected.emailId) ?? selected) : null,
+    [summaries, selected]
+  );
 
   function handleSelect(email: EmailSummary) {
     if (selected?.emailId === email.emailId) { setSelected(null); return; }
@@ -358,7 +283,7 @@ export default function InboxView({
 
                     {/* Avatar */}
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5 ${avatarColor(email.from)}`}>
-                      {initials(email.from)}
+                      {parseSender(email.from).initials}
                     </div>
 
                     {/* Content */}
@@ -366,13 +291,13 @@ export default function InboxView({
                       {/* Name + time */}
                       <div className="flex items-baseline justify-between gap-1 mb-0.5">
                         <span className={`text-sm truncate ${isUnread ? "font-semibold text-gray-900" : "text-gray-600"}`}>
-                          {senderName(email.from)}
+                          {parseSender(email.from).name}
                         </span>
                         <span className="text-[11px] text-gray-400 flex-shrink-0">{formatRelative(email.date)}</span>
                       </div>
 
                       {/* Sender email address */}
-                      <p className="text-[11px] text-gray-400 truncate mb-1">{senderEmail(email.from)}</p>
+                      <p className="text-[11px] text-gray-400 truncate mb-1">{parseSender(email.from).email}</p>
 
                       {/* Subject */}
                       <p className={`text-xs truncate mb-2 ${isUnread ? "font-semibold text-gray-800" : "font-medium text-gray-600"}`}>
@@ -465,18 +390,20 @@ export default function InboxView({
 
               <div className="flex-1" />
 
-              {/* Action buttons */}
-              <button className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                </svg>
-                Reply
-              </button>
-              <button className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                </svg>
-                Forward
+              {/* Re-process AI for this single email */}
+              <button
+                onClick={() => handleResyncEmail(selectedEmail.emailId)}
+                disabled={isResyncing}
+                title="Re-run AI summarization on this email (no IMAP)"
+                className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 px-3 py-1.5 rounded-lg border border-indigo-200 hover:bg-indigo-50 disabled:opacity-50 transition-colors"
+              >
+                {isResyncing
+                  ? <div className="w-3.5 h-3.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                  : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                }
+                Re-process AI
               </button>
 
               {/* Status picker */}
@@ -496,13 +423,13 @@ export default function InboxView({
               </h2>
               <div className="flex items-start gap-3">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarColor(selectedEmail.from)}`}>
-                  {initials(selectedEmail.from)}
+                  {parseSender(selectedEmail.from).initials}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline justify-between gap-2 flex-wrap">
                     <div>
-                      <span className="text-sm font-semibold text-gray-900">{senderName(selectedEmail.from)}</span>
-                      <span className="text-xs text-gray-400 ml-1.5">&lt;{senderEmail(selectedEmail.from)}&gt;</span>
+                      <span className="text-sm font-semibold text-gray-900">{parseSender(selectedEmail.from).name}</span>
+                      <span className="text-xs text-gray-400 ml-1.5">&lt;{parseSender(selectedEmail.from).email}&gt;</span>
                     </div>
                     <span className="text-xs text-gray-400 flex-shrink-0">{formatFull(selectedEmail.date)}</span>
                   </div>
@@ -553,95 +480,7 @@ export default function InboxView({
               <div className="px-4 sm:px-6 py-5 max-w-2xl mx-auto space-y-5">
 
                 {detailTab === "summary" && (
-                  <>
-                    {/* AI Summary — numbered bullets */}
-                    <div className="rounded-xl border border-indigo-100 overflow-hidden">
-                      <div className="flex items-center gap-2 px-4 py-3 bg-indigo-50 border-b border-indigo-100">
-                        <svg className="w-4 h-4 text-indigo-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
-                        <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">AI Summary</span>
-                      </div>
-                      <ul className="bg-white divide-y divide-indigo-50">
-                        {selectedEmail.summary
-                          .split(/(?<=[.!?])\s+/)
-                          .map(s => s.trim())
-                          .filter(s => s.length > 10)
-                          .map((sentence, i) => (
-                            <li key={i} className="flex items-start gap-3 px-4 py-3">
-                              <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">
-                                {i + 1}
-                              </span>
-                              <span className="text-sm text-gray-700 leading-relaxed">{sentence}</span>
-                            </li>
-                          ))}
-                      </ul>
-                    </div>
-
-                    {/* Key Points — bordered highlighted list */}
-                    {selectedEmail.keyPoints.length > 0 && (
-                      <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
-                        <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-100">
-                          <svg className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                          </svg>
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Key Highlights</p>
-                        </div>
-                        <ul className="divide-y divide-gray-100">
-                          {selectedEmail.keyPoints.map((pt, i) => {
-                            const borders = ["border-l-violet-400","border-l-blue-400","border-l-emerald-400","border-l-amber-400","border-l-rose-400","border-l-cyan-400"];
-                            const badges  = ["bg-violet-100 text-violet-700","bg-blue-100 text-blue-700","bg-emerald-100 text-emerald-700","bg-amber-100 text-amber-700","bg-rose-100 text-rose-700","bg-cyan-100 text-cyan-700"];
-                            return (
-                              <li key={i} className={`flex items-start gap-3 px-4 py-3 border-l-4 ${borders[i % borders.length]}`}>
-                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 min-w-[22px] text-center ${badges[i % badges.length]}`}>
-                                  {i + 1}
-                                </span>
-                                <span className="text-sm text-gray-800 font-medium leading-snug">{pt}</span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* PDF / Attachment Summary — bullet points */}
-                    {selectedEmail.attachmentSummary && (
-                      <div className="rounded-xl border border-amber-100 overflow-hidden">
-                        <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
-                          <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                          <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">PDF / Attachment Summary</span>
-                        </div>
-                        <ul className="bg-white divide-y divide-amber-50">
-                          {selectedEmail.attachmentSummary
-                            .split(/(?<=[.!?])\s+/)
-                            .map(s => s.trim())
-                            .filter(s => s.length > 10)
-                            .map((sentence, i) => (
-                              <li key={i} className="flex items-start gap-3 px-4 py-3">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0 mt-2" />
-                                <span className="text-sm text-gray-700 leading-relaxed">{sentence}</span>
-                              </li>
-                            ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Purpose */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-gray-50 rounded-xl p-3.5">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Purpose</p>
-                        <p className="text-sm font-semibold text-gray-800">{selectedEmail.purpose}</p>
-                      </div>
-                      <div className="bg-gray-50 rounded-xl p-3.5">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Sentiment</p>
-                        <p className={`text-sm font-semibold capitalize ${selectedEmail.sentiment === "positive" ? "text-emerald-600" : selectedEmail.sentiment === "negative" ? "text-red-500" : "text-gray-600"}`}>
-                          {selectedEmail.sentiment}
-                        </p>
-                      </div>
-                    </div>
-                  </>
+                  <EmailInsightsPanel email={selectedEmail} />
                 )}
 
                 {detailTab === "email" && (
@@ -651,7 +490,7 @@ export default function InboxView({
                         <div className="rounded-xl border border-gray-200 overflow-hidden">
                           <iframe
                             srcDoc={selectedEmail.htmlBody}
-                            sandbox="allow-same-origin"
+                            sandbox=""
                             className="w-full bg-white"
                             style={{ height: "500px", border: "none" }}
                             title="Email content"

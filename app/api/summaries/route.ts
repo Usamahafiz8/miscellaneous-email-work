@@ -6,11 +6,21 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(Math.max(1, Number(searchParams.get("limit")) || 50), 100);
   const offset = Math.max(0, Number(searchParams.get("offset")) || 0);
 
-  const result = await getCachedSummaries(limit, offset);
-  return NextResponse.json(result);
+  try {
+    const result = await getCachedSummaries(limit, offset);
+    return NextResponse.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch summaries";
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
 }
 
 export async function DELETE() {
-  await clearCache();
-  return NextResponse.json({ success: true, message: "All summaries deleted" });
+  try {
+    await clearCache();
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to clear cache";
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
 }

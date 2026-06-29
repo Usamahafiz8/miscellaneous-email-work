@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const summaries = await summarizeEmails(req.emails, req.summaryLength);
-    cacheSummaries(summaries);
+    await cacheSummaries(summaries);
     return NextResponse.json({ success: true, summaries });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to summarize emails";
