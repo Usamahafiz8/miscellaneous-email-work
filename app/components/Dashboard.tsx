@@ -31,7 +31,7 @@ export default function Dashboard() {
     setError(null);
     try {
       const res = await fetch(`/api/email/process?offset=${offset}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to load emails");
 
       const incoming: EmailSummary[] = data.summaries ?? [];
@@ -65,7 +65,7 @@ export default function Dashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ offset: 0 }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
 
       const incoming: EmailSummary[] = data.summaries ?? [];

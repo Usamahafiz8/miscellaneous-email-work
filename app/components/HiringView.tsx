@@ -64,8 +64,8 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ summary: email.summary, keyPoints: email.keyPoints, subject: email.subject, criteria }),
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error ?? "Evaluation failed");
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Evaluation failed");
       setEvaluations(prev => new Map(prev).set(email.emailId, { loading: false, result: data.evaluation, error: null }));
     } catch (err) {
       setEvaluations(prev => new Map(prev).set(email.emailId, {
