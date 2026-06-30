@@ -6,7 +6,6 @@ import Sidebar from "./Sidebar";
 import DashboardHome from "./DashboardHome";
 import InboxView from "./InboxView";
 import HiringView from "./HiringView";
-import AnalyticsView from "./AnalyticsView";
 import ErrorAlert from "./ErrorAlert";
 
 export default function Dashboard() {
@@ -124,7 +123,14 @@ export default function Dashboard() {
   const loadMore = useCallback(() => loadFromDB(nextOffset), [loadFromDB, nextOffset]);
 
   const handleStatusChange = useCallback((emailId: string, status: EmailStatus) => {
+    // Optimistic update in memory
     setStatusOverrides((prev) => new Map(prev).set(emailId, status));
+    // Persist to DB — fire and forget, errors are silent to avoid interrupting UX
+    fetch("/api/summaries", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ emailId, status }),
+    }).catch(() => {/* ignore */});
   }, []);
 
   const enriched = useMemo(
@@ -197,9 +203,6 @@ export default function Dashboard() {
               isLoading={isLoading || isSyncing}
               onFetch={syncEmails}
             />
-          )}
-          {activeNav === "analytics" && (
-            <AnalyticsView summaries={enriched} />
           )}
         </div>
       </div>

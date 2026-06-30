@@ -47,7 +47,7 @@ Body: ${body}${attachmentSection}`;
 
   const hasAttachments = attachmentTexts && attachmentTexts.size > 0;
   const attachmentSummaryField = hasAttachments
-    ? `\n    "attachmentSummary": "Start with 'In this PDF, we have a [document type] that contains:' then list the key contents, figures, candidate details, or important data found inside. 3-5 sentences. Null if no attachment.",`
+    ? `\n    "attachmentSummary": "Extract structured info from the PDF as § bullet lines. Format: '§ Label: Value'. Include these sections (omit if no data): § Document Type, § Name, § Current Role, § Total Experience, § Work History (Company — Role, Year–Year per entry), § Technologies & Skills (comma list), § Education (Degree — University — Year), § Key Achievements, § Other Details. Be specific — real names, companies, years, tech stacks. Output only the § lines, nothing else. Null if no attachment.",`
     : `\n    "attachmentSummary": null,`;
 
   return `You are analyzing business emails for a company dashboard. Analyze ALL emails below and respond ONLY with a valid JSON array — no markdown, no code blocks.
@@ -161,20 +161,35 @@ export async function summarizePdfAttachment(
   from: string,
   pdfTexts: string[]
 ): Promise<string | null> {
-  const prompt = `You are analyzing a PDF attachment from an email.
+  const prompt = `You are extracting structured information from a PDF attachment. Be specific and factual — only include fields that have real data in the PDF.
 
 Email Subject: ${subject}
 From: ${from}
 PDF Content:
-${pdfTexts.map((t, i) => `Attachment ${i + 1}:\n${t}`).join("\n\n")}
+${pdfTexts.map((t, i) => `Attachment ${i + 1}:\n${t.slice(0, 6000)}`).join("\n\n")}
 
-Summarize what this PDF contains. Start with "In this PDF, we have a [document type] that contains:" then describe the key contents — candidate experience, skills, education, figures, names, dates, totals, decisions — whatever is actually present. Be specific and factual. Write 3-5 sentences.
+Extract and format the key information as labeled bullet points exactly like this (omit any section that has no data):
 
-Respond with ONLY the summary text, no JSON, no markdown.`;
+§ Document Type: [Resume / CV / Invoice / Report / Contract / etc.]
+§ Name: [Full name of the person if resume/CV]
+§ Current Role: [Most recent or current job title]
+§ Total Experience: [e.g. "8+ years in full-stack development"]
+§ Work History: [Company Name — Role (Year–Year), Company Name — Role (Year–Year), ...]
+§ Technologies & Skills: [comma-separated list of tools, languages, frameworks]
+§ Education: [Degree — University — Year]
+§ Key Achievements: [notable accomplishments, awards, metrics]
+§ Other Details: [salary expectations, availability, location, visa status, or for invoices: total amount, due date, items]
+
+Rules:
+- Be specific. Write real names, real companies, real years, real technologies — not vague descriptions.
+- For each work history entry include the company name, role, and dates if available.
+- For technologies list everything mentioned: languages, frameworks, databases, tools, cloud platforms.
+- If this is not a resume (e.g. invoice, contract, report), adapt the sections to what makes sense for that document type.
+- Respond ONLY with the § bullet lines, nothing else.`;
 
   const message = await getClient().chat.completions.create({
     model: "meta-llama/llama-3.3-70b-instruct",
-    max_tokens: 400,
+    max_tokens: 700,
     messages: [{ role: "user", content: prompt }],
   });
 

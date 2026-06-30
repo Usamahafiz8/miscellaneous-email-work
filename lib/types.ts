@@ -29,7 +29,7 @@ export type Category = "Hiring" | "Client Support" | "Sales" | "Finance" | "Inte
 export type Priority = "Critical" | "High" | "Medium" | "Low";
 export type ActionRequired = "Yes" | "No";
 export type EmailStatus = "New" | "Open" | "Closed";
-export type NavView = "home" | "inbox" | "hiring" | "analytics";
+export type NavView = "home" | "inbox" | "hiring";
 
 export interface EmailSummary {
   emailId: string;

@@ -16,6 +16,107 @@ function splitSentences(text: string): string[] {
   return text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 10);
 }
 
+// ── Structured PDF section labels → display config ─────────────────────────
+
+const SECTION_CONFIG: Record<string, { icon: string; color: string }> = {
+  "Document Type":       { icon: "📄", color: "text-amber-700" },
+  "Name":                { icon: "👤", color: "text-indigo-700" },
+  "Current Role":        { icon: "💼", color: "text-violet-700" },
+  "Total Experience":    { icon: "🕐", color: "text-blue-700" },
+  "Work History":        { icon: "🏢", color: "text-emerald-700" },
+  "Technologies & Skills": { icon: "⚙️", color: "text-cyan-700" },
+  "Education":           { icon: "🎓", color: "text-pink-700" },
+  "Key Achievements":    { icon: "🏆", color: "text-orange-700" },
+  "Other Details":       { icon: "📝", color: "text-gray-600" },
+};
+
+interface ParsedSection { label: string; value: string }
+
+function parseSections(text: string): ParsedSection[] | null {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const sections: ParsedSection[] = [];
+  for (const line of lines) {
+    const match = line.match(/^§\s*(.+?):\s*(.+)$/);
+    if (match) sections.push({ label: match[1].trim(), value: match[2].trim() });
+  }
+  return sections.length >= 2 ? sections : null;
+}
+
+function WorkHistoryValue({ value }: { value: string }) {
+  const entries = value.split(/,\s*(?=[A-Z])/);
+  if (entries.length <= 1) return <span className="text-sm text-gray-800">{value}</span>;
+  return (
+    <ul className="space-y-1 mt-0.5">
+      {entries.map((e, i) => (
+        <li key={i} className="text-sm text-gray-800 flex items-start gap-1.5">
+          <span className="text-emerald-500 mt-0.5">›</span>
+          <span>{e.trim()}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function TechValue({ value }: { value: string }) {
+  const tags = value.split(/[,;]\s*/).filter(Boolean);
+  if (tags.length <= 1) return <span className="text-sm text-gray-800">{value}</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-0.5">
+      {tags.map((t, i) => (
+        <span key={i} className="text-[11px] font-medium bg-cyan-50 text-cyan-700 ring-1 ring-cyan-200 px-2 py-0.5 rounded-full">
+          {t.trim()}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AttachmentSummaryPanel({ text }: { text: string }) {
+  const sections = parseSections(text);
+
+  return (
+    <div className="rounded-xl border border-amber-100 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
+        <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+        </svg>
+        <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">PDF / Attachment Summary</span>
+      </div>
+
+      {sections ? (
+        <ul className="bg-white divide-y divide-amber-50/60">
+          {sections.map(({ label, value }) => {
+            const cfg = SECTION_CONFIG[label] ?? { icon: "•", color: "text-gray-600" };
+            return (
+              <li key={label} className="px-4 py-3 flex items-start gap-3">
+                <span className="text-base flex-shrink-0 mt-0.5">{cfg.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${cfg.color}`}>{label}</p>
+                  {label === "Work History"
+                    ? <WorkHistoryValue value={value} />
+                    : label === "Technologies & Skills"
+                    ? <TechValue value={value} />
+                    : <p className="text-sm text-gray-800 leading-relaxed">{value}</p>
+                  }
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <ul className="bg-white divide-y divide-amber-50">
+          {splitSentences(text).map((sentence, i) => (
+            <li key={i} className="flex items-start gap-3 px-4 py-3">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0 mt-2" />
+              <span className="text-sm text-gray-700 leading-relaxed">{sentence}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   email: EmailSummary;
   /** Optional slot rendered between key highlights and PDF summary (e.g. evaluation result) */
@@ -71,22 +172,7 @@ export default function EmailInsightsPanel({ email, extra }: Props) {
 
       {/* PDF / Attachment Summary */}
       {email.attachmentSummary && (
-        <div className="rounded-xl border border-amber-100 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
-            <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-            </svg>
-            <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">PDF / Attachment Summary</span>
-          </div>
-          <ul className="bg-white divide-y divide-amber-50">
-            {splitSentences(email.attachmentSummary).map((sentence, i) => (
-              <li key={i} className="flex items-start gap-3 px-4 py-3">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0 mt-2" />
-                <span className="text-sm text-gray-700 leading-relaxed">{sentence}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <AttachmentSummaryPanel text={email.attachmentSummary} />
       )}
 
       {/* Purpose & Sentiment */}
