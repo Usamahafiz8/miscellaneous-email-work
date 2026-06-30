@@ -4,7 +4,12 @@ import { summarizeEmails } from "@/lib/claude";
 import { cacheSummaries, getCachedSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
 import type { SummaryLength } from "@/lib/types";
 
+// Allow up to 5 minutes — required for Vercel Pro; on Hobby plan cap is 60s
+export const maxDuration = 300;
+
 const PAGE_SIZE = 50;
+// Max new emails to summarize per single sync call — keeps the request under timeout
+const NEW_EMAIL_BATCH = 15;
 
 // Load emails from DB only — no IMAP, no AI calls
 export async function GET(request: NextRequest) {
@@ -61,7 +66,11 @@ export async function POST(request: NextRequest) {
 
     // Check DB for which emails are already summarized
     const existingIds = await getExistingEmailIds(emails.map((e) => e.id));
-    const newEmails = emails.filter((e) => !existingIds.has(e.id));
+    const allNewEmails = emails.filter((e) => !existingIds.has(e.id));
+
+    // Only process up to NEW_EMAIL_BATCH new emails per call to stay under timeout
+    const newEmails = allNewEmails.slice(0, NEW_EMAIL_BATCH);
+    const pendingCount = allNewEmails.length - newEmails.length;
 
     if (newEmails.length > 0) {
       const newSummaries = await summarizeEmails(newEmails, summaryLength);
@@ -76,6 +85,8 @@ export async function POST(request: NextRequest) {
       summaries,
       emailCount: summaries.length,
       newCount: newEmails.length,
+      // pendingCount > 0 means there are more new emails to process — client should call again
+      pendingCount,
       totalCount,
       offset,
     });

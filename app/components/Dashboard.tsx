@@ -53,29 +53,43 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Clear DB then re-sync everything — forces re-generation of attachment summaries
+  // Clear DB then re-sync everything in batches (avoids 504 on large mailboxes)
   const clearAndResync = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
     setError(null);
     setSummaries([]);
+    let totalNew = 0;
     try {
       const del = await fetch("/api/summaries", { method: "DELETE" });
       if (!del.ok) throw new Error("Failed to clear summaries");
-      const res = await fetch("/api/email/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset: 0 }),
-      });
-      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
-      const incoming: EmailSummary[] = data.summaries ?? [];
-      setSummaries(incoming);
-      setStatusOverrides(new Map());
-      setTotalCount(data.totalCount ?? 0);
-      setNextOffset(incoming.length);
+
+      let pendingCount = 1;
+      while (pendingCount > 0) {
+        const res = await fetch("/api/email/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset: 0 }),
+        });
+        const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+        if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
+
+        const incoming: EmailSummary[] = data.summaries ?? [];
+        setSummaries(incoming);
+        setStatusOverrides(new Map());
+        setTotalCount(data.totalCount ?? 0);
+        setNextOffset(incoming.length);
+
+        totalNew += data.newCount ?? 0;
+        pendingCount = data.pendingCount ?? 0;
+
+        if (pendingCount > 0) {
+          setSyncMessage(`Re-syncing… ${totalNew} done, ${pendingCount} remaining`);
+        }
+      }
+
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      setSyncMessage(`Re-synced ${incoming.length} email${incoming.length !== 1 ? "s" : ""} with fresh AI summaries`);
+      setSyncMessage(`Re-synced ${totalNew} email${totalNew !== 1 ? "s" : ""} with fresh AI summaries`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
@@ -83,31 +97,43 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Sync from IMAP — runs AI only for emails not in DB yet
+  // Sync from IMAP — runs AI only for emails not in DB yet.
+  // If there are more new emails than the per-call cap, automatically keeps calling
+  // until all are summarized (avoids 504 by processing in safe batches).
   const syncEmails = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
     setError(null);
+    let totalNew = 0;
     try {
-      const res = await fetch("/api/email/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset: 0 }),
-      });
-      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
+      let pendingCount = 1; // start >0 to enter the loop
+      while (pendingCount > 0) {
+        const res = await fetch("/api/email/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset: 0 }),
+        });
+        const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+        if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
 
-      const incoming: EmailSummary[] = data.summaries ?? [];
-      setSummaries(incoming);
-      setStatusOverrides(new Map());
-      setTotalCount(data.totalCount ?? 0);
-      setNextOffset(incoming.length);
+        const incoming: EmailSummary[] = data.summaries ?? [];
+        setSummaries(incoming);
+        setStatusOverrides(new Map());
+        setTotalCount(data.totalCount ?? 0);
+        setNextOffset(incoming.length);
+
+        totalNew += data.newCount ?? 0;
+        pendingCount = data.pendingCount ?? 0;
+
+        if (pendingCount > 0) {
+          setSyncMessage(`Summarized ${totalNew} emails so far, ${pendingCount} remaining…`);
+        }
+      }
+
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-
-      const newCount: number = data.newCount ?? 0;
       setSyncMessage(
-        newCount > 0
-          ? `${newCount} new email${newCount === 1 ? "" : "s"} found and summarized`
+        totalNew > 0
+          ? `${totalNew} new email${totalNew === 1 ? "" : "s"} found and summarized`
           : "Already up to date — no new emails"
       );
     } catch (err) {

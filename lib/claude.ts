@@ -151,8 +151,12 @@ export async function summarizeEmails(
     chunks.push(emails.slice(i, i + CHUNK_SIZE));
   }
 
-  // All chunks run in parallel — wall-clock time = slowest single chunk, not sum of all
-  const results = await Promise.all(chunks.map(chunk => summarizeChunk(chunk, summaryLength)));
+  // Sequential processing — avoids sending 6+ parallel AI requests that each hold open connections,
+  // which causes the total request to blow past proxy/serverless timeouts.
+  const results: EmailSummary[][] = [];
+  for (const chunk of chunks) {
+    results.push(await summarizeChunk(chunk, summaryLength));
+  }
   return results.flat();
 }
 
