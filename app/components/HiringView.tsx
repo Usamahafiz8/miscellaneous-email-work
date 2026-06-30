@@ -75,26 +75,49 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
   const [criteria, setCriteria] = useState<HiringCriteria>({ position: "", mandatory: [], optional: [] });
   const [criteriaOpen, setCriteriaOpen] = useState(true);
   const [evaluations, setEvaluations] = useState<Map<string, EvalState>>(new Map());
+  const [isEvaluatingAll, setIsEvaluatingAll] = useState(false);
   const [selected, setSelected] = useState<EmailSummary | null>(null);
   const [detailTab, setDetailTab] = useState<"insights" | "email">("insights");
+
+  // Candidate filters
+  const [search, setSearch] = useState("");
+  const [filterEval, setFilterEval] = useState<"" | "evaluated" | "unevaluated">("");
+  const [filterMatch, setFilterMatch] = useState<"" | "high" | "medium" | "low">("");
+
+  const hasFilters = !!(search.trim() || filterEval || filterMatch);
 
   const hasCriteria = !!(criteria.position.trim() && criteria.mandatory.length > 0);
 
   const visibleCandidates = useMemo(() => {
     const getText = (e: EmailSummary) =>
-      [e.summary, e.subject, ...e.keyPoints].join(" ").toLowerCase();
+      [e.summary, e.subject, e.from, ...e.keyPoints].join(" ").toLowerCase();
 
     const mandHits = (e: EmailSummary) =>
       hasCriteria ? criteria.mandatory.filter(r => getText(e).includes(r.toLowerCase())).length : 0;
     const optHits = (e: EmailSummary) =>
       hasCriteria ? criteria.optional.filter(r => getText(e).includes(r.toLowerCase())).length : 0;
 
-    const scored = summaries.map(e => ({
+    let scored = summaries.map(e => ({
       email: e,
       mand: mandHits(e),
       opt: optHits(e),
       eval: evaluations.get(e.emailId)?.result ?? null,
     }));
+
+    // Search filter — name, email address, subject, summary, key points
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      scored = scored.filter(({ email }) => getText(email).includes(q));
+    }
+
+    // Evaluated / not evaluated filter
+    if (filterEval === "evaluated") scored = scored.filter(c => c.eval !== null);
+    if (filterEval === "unevaluated") scored = scored.filter(c => c.eval === null);
+
+    // Match score filter (only applies when evaluated)
+    if (filterMatch === "high") scored = scored.filter(c => c.eval && c.eval.matchScore >= 70);
+    if (filterMatch === "medium") scored = scored.filter(c => c.eval && c.eval.matchScore >= 40 && c.eval.matchScore < 70);
+    if (filterMatch === "low") scored = scored.filter(c => c.eval && c.eval.matchScore < 40);
 
     scored.sort((a, b) => {
       if (a.eval && b.eval) return b.eval.matchScore - a.eval.matchScore;
@@ -107,7 +130,7 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
     });
 
     return scored;
-  }, [summaries, evaluations, criteria, hasCriteria]);
+  }, [summaries, evaluations, criteria, hasCriteria, search, filterEval, filterMatch]);
 
   const selectedEmail = selected
     ? (summaries.find(s => s.emailId === selected.emailId) ?? selected)
@@ -139,6 +162,18 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
     }
   }
 
+  async function evaluateAll() {
+    if (!hasCriteria || summaries.length === 0) return;
+    setIsEvaluatingAll(true);
+    // Run sequentially to avoid hammering the API
+    for (const email of summaries) {
+      const existing = evaluations.get(email.emailId);
+      if (existing?.result) continue; // skip already evaluated
+      await evaluate(email);
+    }
+    setIsEvaluatingAll(false);
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">
 
@@ -151,14 +186,83 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
             {hasCriteria ? ` · ${criteria.position}` : ""}
           </p>
         </div>
-        <button onClick={onFetch} disabled={isLoading}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-          {isLoading
-            ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-          }
-          <span className="hidden sm:inline">{isLoading ? "Syncing…" : "Refresh"}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {hasCriteria && summaries.length > 0 && (
+            <button
+              onClick={evaluateAll}
+              disabled={isEvaluatingAll || isLoading}
+              title="Run AI evaluation for all candidates against the job criteria"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-violet-100 hover:bg-violet-200 disabled:opacity-50 text-violet-700 text-sm font-medium transition-colors"
+            >
+              {isEvaluatingAll
+                ? <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              }
+              <span className="hidden sm:inline">{isEvaluatingAll ? "Evaluating…" : "Evaluate All"}</span>
+            </button>
+          )}
+          <button onClick={onFetch} disabled={isLoading}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+            {isLoading
+              ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            }
+            <span className="hidden sm:inline">{isLoading ? "Syncing…" : "Refresh"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Candidate search & filters ──────────────────────────────────── */}
+      <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50/50 px-4 py-2.5 flex flex-wrap items-center gap-2">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
+          </svg>
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search candidates…"
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors"
+          />
+        </div>
+
+        {/* Evaluated filter */}
+        <select
+          value={filterEval}
+          onChange={e => setFilterEval(e.target.value as "" | "evaluated" | "unevaluated")}
+          className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-colors ${filterEval ? "border-violet-400 bg-violet-50 text-violet-700 font-medium" : "border-gray-200 bg-white text-gray-600"}`}
+        >
+          <option value="">All Candidates</option>
+          <option value="evaluated">Evaluated only</option>
+          <option value="unevaluated">Not yet evaluated</option>
+        </select>
+
+        {/* Match score filter — only useful after evaluating */}
+        <select
+          value={filterMatch}
+          onChange={e => setFilterMatch(e.target.value as "" | "high" | "medium" | "low")}
+          disabled={!summaries.some(s => evaluations.get(s.emailId)?.result)}
+          className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${filterMatch ? "border-violet-400 bg-violet-50 text-violet-700 font-medium" : "border-gray-200 bg-white text-gray-600"}`}
+        >
+          <option value="">Any Match Score</option>
+          <option value="high">High match (≥70%)</option>
+          <option value="medium">Medium match (40–69%)</option>
+          <option value="low">Low match (&lt;40%)</option>
+        </select>
+
+        {hasFilters && (
+          <button
+            onClick={() => { setSearch(""); setFilterEval(""); setFilterMatch(""); }}
+            className="flex items-center gap-1 text-xs text-violet-600 font-medium hover:text-violet-800 px-2.5 py-2 rounded-lg border border-violet-200 bg-violet-50 transition-colors"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            Clear
+          </button>
+        )}
+
+        <span className="ml-auto text-xs text-gray-400 hidden sm:block">
+          {visibleCandidates.length}{hasFilters ? ` of ${summaries.length}` : ""} candidate{summaries.length !== 1 ? "s" : ""}
+        </span>
       </div>
 
       {/* ── Job Criteria panel ───────────────────────────────────────────── */}
@@ -215,6 +319,14 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
             <p className="text-sm">No hiring emails found</p>
             <button onClick={onFetch} className="text-sm font-medium text-violet-600 hover:text-violet-700">Sync inbox →</button>
           </div>
+        ) : visibleCandidates.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
+            <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
+            </svg>
+            <p className="text-sm">No candidates match the current filters</p>
+            <button onClick={() => { setSearch(""); setFilterEval(""); setFilterMatch(""); }} className="text-sm font-medium text-violet-600 hover:text-violet-700">Clear filters →</button>
+          </div>
         ) : (
           <table className="w-full text-sm border-collapse min-w-[860px]">
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
@@ -268,10 +380,10 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
                     </td>
 
                     {/* AI Summary */}
-                    <td className="px-4 py-3 max-w-[280px]">
-                      <p className="text-[11px] text-gray-500 line-clamp-2 leading-relaxed">{email.summary}</p>
+                    <td className="px-4 py-3 max-w-[340px]">
+                      <p className="text-[11px] text-gray-600 leading-relaxed">{email.summary}</p>
                       {hasKwMatch && (
-                        <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600">
+                        <span className="inline-block mt-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600">
                           {mand}/{criteria.mandatory.length} req{opt > 0 ? ` +${opt} opt` : ""}
                         </span>
                       )}

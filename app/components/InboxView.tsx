@@ -103,6 +103,26 @@ export default function InboxView({
     }
   }, [onFetch]);
 
+  // Dynamic options derived from actual data — only show what exists, with counts
+  const categoryOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    summaries.forEach(s => { counts[s.category] = (counts[s.category] ?? 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [summaries]);
+
+  const priorityOptions = useMemo(() => {
+    const order = ["Critical", "High", "Medium", "Low"];
+    const counts: Record<string, number> = {};
+    summaries.forEach(s => { counts[s.priority] = (counts[s.priority] ?? 0) + 1; });
+    return order.filter(p => counts[p]).map(p => [p, counts[p]] as [string, number]);
+  }, [summaries]);
+
+  const statusOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    summaries.forEach(s => { counts[s.status] = (counts[s.status] ?? 0) + 1; });
+    return (["New", "Open", "Closed"] as EmailStatus[]).filter(s => counts[s]).map(s => [s, counts[s]] as [string, number]);
+  }, [summaries]);
+
   const filtered = useMemo(() => summaries.filter((s) => {
     if (filterCategory && s.category !== filterCategory) return false;
     if (filterPriority && s.priority !== filterPriority) return false;
@@ -112,7 +132,9 @@ export default function InboxView({
       const q = search.toLowerCase();
       return s.subject.toLowerCase().includes(q)
         || s.from.toLowerCase().includes(q)
-        || s.summary.toLowerCase().includes(q);
+        || s.summary.toLowerCase().includes(q)
+        || s.category.toLowerCase().includes(q)
+        || s.keyPoints.some(kp => kp.toLowerCase().includes(q));
     }
     return true;
   }), [summaries, search, filterCategory, filterPriority, filterAction, filterStatus]);
@@ -160,50 +182,60 @@ export default function InboxView({
             />
           </div>
 
-          {/* Category filter */}
+          {/* Category filter — only shows categories present in data */}
           <select
             value={filterCategory}
             onChange={e => setFilterCategory(e.target.value)}
-            className="text-sm rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+            className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-colors ${filterCategory ? "border-indigo-400 bg-indigo-50 text-indigo-700 font-medium" : "border-gray-200 bg-gray-50 text-gray-600"}`}
           >
-            <option value="">Category</option>
-            {["Hiring","Client Support","Sales","Finance","Internal","Marketing","Technical","General"].map(c => <option key={c}>{c}</option>)}
+            <option value="">All Categories</option>
+            {categoryOptions.map(([cat, count]) => (
+              <option key={cat} value={cat}>{cat} ({count})</option>
+            ))}
           </select>
 
           {/* Priority filter */}
           <select
             value={filterPriority}
             onChange={e => setFilterPriority(e.target.value)}
-            className="text-sm rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+            className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-colors ${filterPriority ? "border-indigo-400 bg-indigo-50 text-indigo-700 font-medium" : "border-gray-200 bg-gray-50 text-gray-600"}`}
           >
-            <option value="">Priority</option>
-            {["Critical","High","Medium","Low"].map(p => <option key={p}>{p}</option>)}
+            <option value="">All Priorities</option>
+            {priorityOptions.map(([p, count]) => (
+              <option key={p} value={p}>{p} ({count})</option>
+            ))}
           </select>
 
-          {/* Action filter */}
+          {/* Action Required filter */}
           <select
             value={filterAction}
             onChange={e => setFilterAction(e.target.value)}
-            className="text-sm rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400"
+            className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-colors ${filterAction ? "border-indigo-400 bg-indigo-50 text-indigo-700 font-medium" : "border-gray-200 bg-gray-50 text-gray-600"}`}
           >
-            <option value="">Action</option>
-            <option value="Yes">Action Required</option>
-            <option value="No">No Action</option>
+            <option value="">Any Action</option>
+            <option value="Yes">⚡ Action Required</option>
+            <option value="No">No Action Needed</option>
           </select>
 
-          {/* Status filter */}
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-            className="text-sm rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400">
+          {/* Status filter — only shows statuses present in data */}
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+            className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-colors ${filterStatus ? "border-indigo-400 bg-indigo-50 text-indigo-700 font-medium" : "border-gray-200 bg-gray-50 text-gray-600"}`}
+          >
             <option value="">All Status</option>
-            {STATUSES.map(s => <option key={s}>{s}</option>)}
+            {statusOptions.map(([s, count]) => (
+              <option key={s} value={s}>{s} ({count})</option>
+            ))}
           </select>
 
           {hasFilters && (
             <button
               onClick={() => { setSearch(""); setFilterCategory(""); setFilterPriority(""); setFilterAction(""); setFilterStatus(""); }}
-              className="text-xs text-gray-400 hover:text-gray-600 px-2 py-2 rounded-lg border border-gray-200 bg-gray-50 transition-colors"
+              className="flex items-center gap-1 text-xs text-indigo-600 font-medium hover:text-indigo-800 px-2.5 py-2 rounded-lg border border-indigo-200 bg-indigo-50 transition-colors"
             >
-              Clear
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              Clear filters
             </button>
           )}
 
@@ -253,8 +285,14 @@ export default function InboxView({
       {/* ── Table count bar ──────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-gray-50/50 flex-shrink-0">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-          {filtered.length} of {summaries.length}{totalCount > summaries.length ? ` · ${totalCount} total` : ""}
+          {hasFilters
+            ? <><span className="text-indigo-600">{filtered.length}</span> of {summaries.length} emails{totalCount > summaries.length ? ` · ${totalCount} in mailbox` : ""}</>
+            : <>{summaries.length} emails{totalCount > summaries.length ? ` · ${totalCount} in mailbox` : ""}</>
+          }
         </span>
+        {hasFilters && filtered.length === 0 && (
+          <span className="text-xs text-amber-600 font-medium">No emails match — try different filters</span>
+        )}
       </div>
 
       {/* ── Table ───────────────────────────────────────────────────── */}
@@ -342,19 +380,19 @@ export default function InboxView({
                           {email.subject || "(No Subject)"}
                         </p>
                         {(email.attachments?.length ?? 0) > 0 && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] text-gray-400 mt-0.5">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+                            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                             </svg>
-                            {email.attachments!.length} attachment{email.attachments!.length > 1 ? "s" : ""}
+                            {email.attachments!.length} PDF{email.attachments!.length > 1 ? "s" : ""}
                           </span>
                         )}
                       </div>
                     </td>
 
                     {/* AI Summary */}
-                    <td className="px-4 py-3 max-w-[300px]">
-                      <p className="text-[11px] text-gray-500 line-clamp-2 leading-relaxed">
+                    <td className="px-4 py-3 max-w-[360px]">
+                      <p className="text-[11px] text-gray-600 leading-relaxed">
                         {email.summary}
                       </p>
                     </td>
