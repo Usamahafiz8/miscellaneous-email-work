@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { EmailSummary, EmailStatus, NavView } from "@/lib/types";
 import Sidebar from "./Sidebar";
 import DashboardHome from "./DashboardHome";
@@ -21,6 +21,8 @@ export default function Dashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
+  const detailFetchedRef = useRef<Set<string>>(new Set());
 
   // Load from DB (no IMAP, no AI) — used on mount and for "load more"
   const loadFromDB = useCallback(async (offset = 0) => {
@@ -148,6 +150,27 @@ export default function Dashboard() {
 
   const loadMore = useCallback(() => loadFromDB(nextOffset), [loadFromDB, nextOffset]);
 
+  // List rows omit body/htmlBody/attachments to keep the initial load light —
+  // fetch the full content for one email the moment its detail pane is opened.
+  const loadEmailDetail = useCallback(async (emailId: string) => {
+    if (detailFetchedRef.current.has(emailId)) return;
+    detailFetchedRef.current.add(emailId);
+    setLoadingDetailId(emailId);
+    try {
+      const res = await fetch(`/api/summaries/${encodeURIComponent(emailId)}`);
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success && data.summary) {
+        setSummaries((prev) => prev.map((s) => (s.emailId === emailId ? { ...s, ...data.summary } : s)));
+      } else {
+        detailFetchedRef.current.delete(emailId);
+      }
+    } catch {
+      detailFetchedRef.current.delete(emailId);
+    } finally {
+      setLoadingDetailId((id) => (id === emailId ? null : id));
+    }
+  }, []);
+
   const handleStatusChange = useCallback((emailId: string, status: EmailStatus) => {
     // Optimistic update in memory
     setStatusOverrides((prev) => new Map(prev).set(emailId, status));
@@ -221,6 +244,8 @@ export default function Dashboard() {
               onClearAndResync={clearAndResync}
               onLoadMore={loadMore}
               onStatusChange={handleStatusChange}
+              onLoadDetail={loadEmailDetail}
+              loadingDetailId={loadingDetailId}
             />
           )}
           {activeNav === "hiring" && (
@@ -228,6 +253,8 @@ export default function Dashboard() {
               summaries={hiringEmails}
               isLoading={isLoading || isSyncing}
               onFetch={syncEmails}
+              onLoadDetail={loadEmailDetail}
+              loadingDetailId={loadingDetailId}
             />
           )}
         </div>

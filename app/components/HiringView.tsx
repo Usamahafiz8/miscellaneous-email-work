@@ -10,6 +10,8 @@ interface HiringViewProps {
   summaries: EmailSummary[];
   isLoading: boolean;
   onFetch: () => void;
+  onLoadDetail: (emailId: string) => void;
+  loadingDetailId: string | null;
 }
 
 interface EvalState {
@@ -71,7 +73,7 @@ function ScoreRing({ score }: { score: number }) {
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
-export default function HiringView({ summaries, isLoading, onFetch }: HiringViewProps) {
+export default function HiringView({ summaries, isLoading, onFetch, onLoadDetail, loadingDetailId }: HiringViewProps) {
   const [criteria, setCriteria] = useState<HiringCriteria>({ position: "", mandatory: [], optional: [] });
   const [criteriaOpen, setCriteriaOpen] = useState(true);
   const [evaluations, setEvaluations] = useState<Map<string, EvalState>>(new Map());
@@ -140,6 +142,7 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
     if (selected?.emailId === email.emailId) { setSelected(null); return; }
     setSelected(email);
     setDetailTab("insights");
+    onLoadDetail(email.emailId);
   }
 
   async function evaluate(email: EmailSummary) {
@@ -471,6 +474,7 @@ export default function HiringView({ summaries, isLoading, onFetch }: HiringView
             onClose={() => setSelected(null)}
             onEvaluate={() => evaluate(selectedEmail)}
             hasCriteria={hasCriteria}
+            isLoadingDetail={loadingDetailId === selectedEmail.emailId}
           />
         </>
       )}
@@ -488,9 +492,10 @@ interface DetailPanelProps {
   onClose: () => void;
   onEvaluate: () => void;
   hasCriteria: boolean;
+  isLoadingDetail: boolean;
 }
 
-function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEvaluate, hasCriteria }: DetailPanelProps) {
+function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEvaluate, hasCriteria, isLoadingDetail }: DetailPanelProps) {
   const sender = parseSender(email.from);
   const evaluated = evalState?.result ?? null;
   const candidateName = (evaluated?.candidateName && evaluated.candidateName !== "Unknown Candidate")
@@ -613,6 +618,14 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
                     <pre className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-sans break-words">{email.body}</pre>
                   </div>
                 )
+              ) : isLoadingDetail ? (
+                <div className="text-center py-12 text-gray-400">
+                  <svg className="w-6 h-6 mx-auto mb-2 animate-spin text-violet-400" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <p className="text-sm">Loading email content…</p>
+                </div>
               ) : (
                 <div className="text-center py-12 text-gray-400">
                   <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">

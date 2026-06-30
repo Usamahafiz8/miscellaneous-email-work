@@ -34,18 +34,30 @@ function toEmailSummary(row: {
   };
 }
 
+// List views only render subject/summary/badges — body/htmlBody/attachments are
+// large (avg ~8KB/email) and only needed for the single email a user has open,
+// so they're excluded here and fetched on demand via getEmailDetail().
+const LIST_SELECT = {
+  emailId: true, from: true, subject: true, date: true,
+  body: false, htmlBody: false, attachments: false,
+  attachmentSummary: true,
+  summary: true, keyPoints: true, sentiment: true, category: true,
+  priority: true, actionRequired: true, purpose: true, status: true, fetchedAt: true,
+} as const;
+
 export async function getCachedSummaries(limit: number, offset: number) {
   const [summaries, total] = await Promise.all([
     prisma.emailSummary.findMany({
       orderBy: { date: "desc" },
       take: limit,
       skip: offset,
+      select: LIST_SELECT,
     }),
     prisma.emailSummary.count(),
   ]);
 
   return {
-    summaries: summaries.map(toEmailSummary),
+    summaries: summaries.map((s) => toEmailSummary({ ...s, body: null, htmlBody: null, attachments: null })),
     total,
     limit,
     offset,
@@ -63,15 +75,28 @@ export async function getExistingEmailIds(ids: string[]): Promise<Set<string>> {
 export async function getSummariesByIds(ids: string[]): Promise<EmailSummary[]> {
   const rows = await prisma.emailSummary.findMany({
     where: { emailId: { in: ids } },
+    select: LIST_SELECT,
   });
   // preserve the order of ids
   const map = new Map(rows.map((r) => [r.emailId, r]));
-  return ids.flatMap((id) => (map.has(id) ? [toEmailSummary(map.get(id)!)] : []));
+  return ids.flatMap((id) =>
+    map.has(id) ? [toEmailSummary({ ...map.get(id)!, body: null, htmlBody: null, attachments: null })] : []
+  );
+}
+
+// Fetches the full row (including body/htmlBody/attachments) for a single email —
+// used when a user opens an email's detail pane.
+export async function getEmailDetail(emailId: string): Promise<EmailSummary | null> {
+  const row = await prisma.emailSummary.findUnique({ where: { emailId } });
+  return row ? toEmailSummary(row) : null;
 }
 
 export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
   if (summaries.length === 0) return;
-  // Run upserts in a transaction — single round-trip to the DB instead of N parallel connections
+  // Each upsert is its own round-trip (not a single batched statement), and rows can carry
+  // a large htmlBody (tens of KB), so a batch of NEW_EMAIL_BATCH (15) upserts can comfortably
+  // exceed Prisma's 5s default transaction timeout over a pooled Neon connection — raise it
+  // well above what a real batch needs, bounded by the route's 300s maxDuration.
   await prisma.$transaction(
     summaries.map((s) =>
       prisma.emailSummary.upsert({
@@ -105,7 +130,8 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
           status: s.status ?? "New",
         },
       })
-    )
+    ),
+    { timeout: 60_000, maxWait: 10_000 }
   );
 }
 

@@ -37,7 +37,7 @@ function buildBatchPrompt(
     const texts = attachmentTexts?.get(e.id);
     const attachmentSection = texts?.length
       ? "\n" + texts.map((t, j) => `Attachment ${j + 1} content: ${t}`).join("\n")
-      : "";
+      : "\nAttachments: none";
     return `--- Email ${i + 1} ---
 ID: ${e.id}
 From: ${e.from}
@@ -47,7 +47,7 @@ Body: ${body}${attachmentSection}`;
 
   const hasAttachments = attachmentTexts && attachmentTexts.size > 0;
   const attachmentSummaryField = hasAttachments
-    ? `\n    "attachmentSummary": "Extract structured info from the PDF as § bullet lines. Format: '§ Label: Value'. Include these sections (omit if no data): § Document Type, § Name, § Current Role, § Total Experience, § Work History (Company — Role, Year–Year per entry), § Technologies & Skills (comma list), § Education (Degree — University — Year), § Key Achievements, § Other Details. Be specific — real names, companies, years, tech stacks. Output only the § lines, nothing else. Null if no attachment.",`
+    ? `\n    "attachmentSummary": "ONLY for emails whose block above contains an 'Attachment N content:' line: extract structured info from THAT attachment text as § bullet lines. Format: '§ Label: Value'. Include these sections (omit if no data): § Document Type, § Name, § Current Role, § Total Experience, § Work History (Company — Role, Year–Year per entry), § Technologies & Skills (comma list), § Education (Degree — University — Year), § Key Achievements, § Other Details. Be specific — real names, companies, years, tech stacks. Output only the § lines, nothing else. For any email block that says 'Attachments: none', you MUST set attachmentSummary to null — never fabricate or infer attachment content from the email body or subject, even if the body mentions an attached CV/resume.",`
     : `\n    "attachmentSummary": null,`;
 
   return `You are analyzing business emails for a company dashboard. Analyze ALL emails below and respond ONLY with a valid JSON array — no markdown, no code blocks.
@@ -72,7 +72,7 @@ Category rules: Hiring=resumes/applications, Client Support=customer issues, Sal
 Priority rules: Critical=server down/urgent legal, High=client awaiting reply/urgent meetings, Medium=standard correspondence, Low=newsletters/notifications
 actionRequired: Yes=needs human response/action, No=informational only
 keyPoints rules: Extract the most important, specific facts. For hiring emails: years of experience, skills, role applied for, education, notable achievements, availability, expected salary. For other emails: action items, deadlines, amounts, decisions, people mentioned. Each point must be a complete, self-contained fact (not vague like "good candidate"). Aim for 5 points minimum.
-attachmentSummary: Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual. Set to null if no attachment content was provided.`;
+attachmentSummary: Only for emails whose block includes an "Attachment N content:" line. Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content of THAT attachment text — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual, and base it strictly on the attachment text, never on the email body or subject. Set to null if the email's block says "Attachments: none" — do not guess or fabricate.`;
 }
 
 function safeParseJSON(text: string): Record<string, unknown>[] {

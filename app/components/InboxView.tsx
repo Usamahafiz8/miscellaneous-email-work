@@ -17,6 +17,8 @@ interface InboxViewProps {
   onClearAndResync: () => void;
   onLoadMore: () => void;
   onStatusChange: (emailId: string, status: EmailStatus) => void;
+  onLoadDetail: (emailId: string) => void;
+  loadingDetailId: string | null;
 }
 
 const PRIORITY_DOT: Record<Priority, string> = {
@@ -53,7 +55,7 @@ const STATUS_STYLE: Record<EmailStatus, string> = {
 
 export default function InboxView({
   summaries, isLoading, isLoadingMore, hasMore, totalCount,
-  onFetch, onClearAndResync, onLoadMore, onStatusChange,
+  onFetch, onClearAndResync, onLoadMore, onStatusChange, onLoadDetail, loadingDetailId,
 }: InboxViewProps) {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
@@ -148,6 +150,7 @@ export default function InboxView({
     if (selected?.emailId === email.emailId) { setSelected(null); return; }
     setSelected(email);
     setDetailTab("summary");
+    onLoadDetail(email.emailId);
     if (email.status === "New") onStatusChange(email.emailId, "Open");
   }
 
@@ -588,6 +591,14 @@ export default function InboxView({
                           </pre>
                         </div>
                       )
+                    ) : loadingDetailId === selectedEmail.emailId ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <svg className="w-6 h-6 mx-auto mb-2 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        <p className="text-sm">Loading email content…</p>
+                      </div>
                     ) : (
                       <div className="text-center py-12 text-gray-400">
                         <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -25,5 +25,6 @@ model EmailSummary {
   status            String   @default("New")
   fetchedAt      DateTime @default(now())
 
+  @@index([date(sort: Desc)])
   @@map("email_summaries")
 }
