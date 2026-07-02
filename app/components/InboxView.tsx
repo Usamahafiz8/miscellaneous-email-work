@@ -78,7 +78,7 @@ const FULL_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
   },
   {
     key: "summary", header: "AI Summary", width: "280px",
-    render: (r) => <span className="truncate block text-xs text-gray-500">{r.summary}</span>,
+    render: (r) => <span className="block text-xs text-gray-500 whitespace-normal break-words py-1">{r.summary}</span>,
   },
   {
     key: "category", header: "Category", width: "120px",

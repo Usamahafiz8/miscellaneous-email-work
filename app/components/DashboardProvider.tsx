@@ -49,6 +49,9 @@ interface DashboardContextValue {
   getEmailDetail: (emailId: string) => EmailSummary | undefined;
   // Distinct tags in use, for tag-input autocomplete — fetched once, refreshed after a tag edit.
   availableTags: string[];
+  // Distinct AI-extracted skills across all candidates, for the skills filter's option list
+  // — fetched once on mount, never refreshed after (skills aren't user-editable, unlike tags).
+  availableSkills: string[];
   // Persists a status/stage/tags change + keeps the detail cache consistent + refreshes
   // sidebar counts (and available tags, if tags changed). Callers are responsible for
   // optimistically updating their own local row state.
@@ -76,6 +79,7 @@ export default function DashboardProvider({ children }: { children: React.ReactN
   const overviewFetchedRef = useRef(false);
 
   const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<string[]>([]);
 
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
   const [detailCache, setDetailCache] = useState<Map<string, EmailSummary>>(new Map());
@@ -99,6 +103,14 @@ export default function DashboardProvider({ children }: { children: React.ReactN
     } catch { /* keep last known tags on failure */ }
   }, []);
 
+  const refreshSkills = useCallback(async () => {
+    try {
+      const res = await fetch("/api/summaries/skills");
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) setAvailableSkills(data.skills ?? []);
+    } catch { /* keep last known skills on failure */ }
+  }, []);
+
   const refreshOverview = useCallback(async () => {
     overviewFetchedRef.current = true;
     setIsOverviewLoading(true);
@@ -120,6 +132,7 @@ export default function DashboardProvider({ children }: { children: React.ReactN
   useEffect(() => {
     refreshCounts();
     refreshTags();
+    refreshSkills();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -256,11 +269,11 @@ export default function DashboardProvider({ children }: { children: React.ReactN
   const contextValue = useMemo<DashboardContextValue>(() => ({
     counts, isSyncing, lastFetched, syncMessage, dismissSyncMessage, error, dismissError,
     syncEmails, clearAndResync, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
-    loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, patchEmail,
+    loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   }), [
     counts, isSyncing, lastFetched, syncMessage, dismissSyncMessage, error, dismissError,
     syncEmails, clearAndResync, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
-    loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, patchEmail,
+    loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   ]);
 
   return (

@@ -6,6 +6,7 @@ import type { EmailSummary, Stage } from "@/lib/types";
 import { STAGES } from "@/lib/types";
 import { useDashboard } from "./DashboardProvider";
 import DataTable, { type ColumnDef, type DataTableSort } from "./DataTable";
+import MultiSelectFilter from "./MultiSelectFilter";
 
 const SHEET_PAGE_SIZE = 300; // unpaged in practice — see DashboardProvider's OVERVIEW_PAGE_SIZE precedent
 
@@ -20,10 +21,13 @@ const STAGE_BADGE: Record<Stage, string> = {
 
 export default function CandidateSheetView() {
   const router = useRouter();
-  const { syncVersion, patchEmail } = useDashboard();
+  const { syncVersion, patchEmail, availableSkills } = useDashboard();
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [skillFilter, setSkillFilter] = useState<string[]>([]);
+  const [keywordsInput, setKeywordsInput] = useState("");
+  const [debouncedKeywords, setDebouncedKeywords] = useState("");
   const [rows, setRows] = useState<EmailSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -36,6 +40,11 @@ export default function CandidateSheetView() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedKeywords(keywordsInput), 300);
+    return () => clearTimeout(t);
+  }, [keywordsInput]);
+
   const fetchAll = useCallback(async () => {
     setIsLoading(true);
     const params = new URLSearchParams();
@@ -43,6 +52,8 @@ export default function CandidateSheetView() {
     params.set("pageSize", String(SHEET_PAGE_SIZE));
     params.append("category", "Hiring");
     if (debouncedSearch) params.set("search", debouncedSearch);
+    skillFilter.forEach((s) => params.append("skill", s));
+    if (debouncedKeywords) params.set("keywords", debouncedKeywords);
     params.set("sortBy", "date");
     params.set("sortOrder", "desc");
     try {
@@ -55,7 +66,7 @@ export default function CandidateSheetView() {
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch]);
+  }, [debouncedSearch, skillFilter, debouncedKeywords]);
 
   useEffect(() => { fetchAll(); }, [fetchAll, syncVersion]);
 
@@ -79,7 +90,7 @@ export default function CandidateSheetView() {
   const columns: ColumnDef<EmailSummary>[] = [
     {
       key: "candidateName", header: "Name", width: "160px", sortable: true,
-      render: (r) => <span className="text-xs font-semibold text-gray-900 whitespace-nowrap">{r.candidateName ?? "—"}</span>,
+      render: (r) => <span className="truncate block text-xs font-semibold text-gray-900">{r.candidateName ?? "—"}</span>,
     },
     {
       key: "candidateRole", header: "Current Role", width: "160px",
@@ -87,7 +98,7 @@ export default function CandidateSheetView() {
     },
     {
       key: "candidateExperience", header: "Experience", width: "130px",
-      render: (r) => <span className="text-xs text-gray-700 whitespace-nowrap">{r.candidateExperience ?? "—"}</span>,
+      render: (r) => <span className="truncate block text-xs text-gray-700">{r.candidateExperience ?? "—"}</span>,
     },
     {
       key: "candidateSkills", header: "Skills", width: "220px",
@@ -171,6 +182,21 @@ export default function CandidateSheetView() {
             <span className="text-xs text-violet-500 font-medium animate-pulse flex-shrink-0">Searching…</span>
           )}
         </div>
+      </div>
+
+      <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50/50 px-6 py-2.5 flex flex-wrap items-center gap-2">
+        <MultiSelectFilter
+          label="Skills"
+          options={availableSkills.map((s) => ({ value: s, label: s }))}
+          selected={skillFilter}
+          onChange={setSkillFilter}
+        />
+        <input
+          value={keywordsInput}
+          onChange={(e) => setKeywordsInput(e.target.value)}
+          placeholder="Keywords (key points & skills)…"
+          className="text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors w-56"
+        />
       </div>
 
       <div className="flex-1 overflow-hidden">

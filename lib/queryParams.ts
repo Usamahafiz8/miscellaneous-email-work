@@ -19,11 +19,13 @@ export function parseEmailListQuery(searchParams: URLSearchParams): EmailListQue
   const actionRequired = searchParams.getAll("actionRequired").filter((a): a is ActionRequired => (VALID_ACTION_REQUIRED as string[]).includes(a));
   const stage = searchParams.getAll("stage").filter((s): s is Stage => (STAGES as string[]).includes(s));
   const tags = Array.from(new Set(searchParams.getAll("tag").map((t) => t.trim()).filter(Boolean))).slice(0, MAX_TAGS_FILTER);
+  const skills = Array.from(new Set(searchParams.getAll("skill").map((s) => s.trim()).filter(Boolean))).slice(0, MAX_TAGS_FILTER);
 
   const dateFromRaw = searchParams.get("dateFrom");
   const dateFrom = dateFromRaw && !isNaN(Date.parse(dateFromRaw)) ? dateFromRaw : undefined;
   const dateToRaw = searchParams.get("dateTo");
   const dateTo = dateToRaw && !isNaN(Date.parse(dateToRaw)) ? dateToRaw : undefined;
+  const keywords = searchParams.get("keywords")?.trim() || undefined;
 
   const sortByRaw = searchParams.get("sortBy");
   const sortBy = VALID_SORT_FIELDS.includes(sortByRaw as SortField) ? (sortByRaw as SortField) : undefined;
@@ -34,12 +36,14 @@ export function parseEmailListQuery(searchParams: URLSearchParams): EmailListQue
     page,
     pageSize,
     search,
+    keywords,
     category: category.length ? category : undefined,
     priority: priority.length ? priority : undefined,
     status: status.length ? status : undefined,
     actionRequired: actionRequired.length ? actionRequired : undefined,
     stage: stage.length ? stage : undefined,
     tags: tags.length ? tags : undefined,
+    skills: skills.length ? skills : undefined,
     dateFrom,
     dateTo,
     sortBy,

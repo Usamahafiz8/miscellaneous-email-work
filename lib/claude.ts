@@ -4,6 +4,7 @@ import type {
   EmailMessage, EmailSummary, SummaryLength,
   Category, Priority, ActionRequired, Sentiment,
   HiringCriteria, CandidateEvaluation,
+  ParsedJobRequirements, JobMatchResult, EmploymentDetails,
 } from "./types";
 
 let _client: OpenAI | null = null;
@@ -65,7 +66,7 @@ Return exactly this JSON array with one object per email in the same order:
     "priority": "Critical|High|Medium|Low",
     "actionRequired": "Yes|No",
     "purpose": "short label e.g. Job Application, Meeting Request, Invoice, Newsletter",${attachmentSummaryField}
-    "candidateProfile": {"name": "...", "role": "...", "experience": "...", "skills": ["..."], "education": "...", "achievements": "..."} or null,
+    "candidateProfile": {"name": "...", "role": "...", "experience": "...", "skills": ["..."], "education": "...", "achievements": "...", "employmentStatus": "...", "noticePeriod": "...", "location": "...", "employmentType": "..."} or null,
   }
 ]
 
@@ -74,7 +75,7 @@ Priority rules: Critical=server down/urgent legal, High=client awaiting reply/ur
 actionRequired: Yes=needs human response/action, No=informational only
 keyPoints rules: Extract the most important, specific facts. For hiring emails: years of experience, skills, role applied for, education, notable achievements, availability, expected salary. For other emails: action items, deadlines, amounts, decisions, people mentioned. Each point must be a complete, self-contained fact (not vague like "good candidate"). Aim for 5 points minimum.
 attachmentSummary: Only for emails whose block includes an "Attachment N content:" line. Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content of THAT attachment text — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual, and base it strictly on the attachment text, never on the email body or subject. Set to null if the email's block says "Attachments: none" — do not guess or fabricate.
-candidateProfile: ONLY for emails you categorized as Hiring. Extract from whichever source has real candidate data — the attachment text if present, otherwise the email body itself (a body-only job application still counts). Fill only fields with real, specific data (real name, real skill names, real years) — omit/null a field rather than guess. Set the entire object to null for non-Hiring emails. Never fabricate from the subject line alone.`;
+candidateProfile: ONLY for emails you categorized as Hiring. Extract from whichever source has real candidate data — the attachment text if present, otherwise the email body itself (a body-only job application still counts). Fill only fields with real, specific data (real name, real skill names, real years) — omit/null a field rather than guess. Set the entire object to null for non-Hiring emails. Never fabricate from the subject line alone. Also extract, when mentioned: employmentStatus (e.g. Currently Employed/Unemployed/serving notice), noticePeriod (e.g. Immediate, 30 days), location (city/country or remote), employmentType (Full-time/Contract/Part-time). Omit any of these four not mentioned rather than guessing.`;
 }
 
 function safeParseJSON(text: string): Record<string, unknown>[] {
@@ -148,6 +149,10 @@ async function summarizeChunk(
       candidateSkills: Array.isArray(profile?.skills) ? (profile!.skills as string[]).map(String) : [],
       candidateEducation: profile?.education ? String(profile.education) : undefined,
       candidateAchievements: profile?.achievements ? String(profile.achievements) : undefined,
+      candidateEmploymentStatus: profile?.employmentStatus ? String(profile.employmentStatus) : undefined,
+      candidateNoticePeriod: profile?.noticePeriod ? String(profile.noticePeriod) : undefined,
+      candidateLocation: profile?.location ? String(profile.location) : undefined,
+      candidateEmploymentType: profile?.employmentType ? String(profile.employmentType) : undefined,
       fetchedAt: new Date().toISOString(),
     };
   });
@@ -258,6 +263,145 @@ If there is no real candidate data in this email at all, respond with: null`;
       skills: Array.isArray(parsed.skills) ? (parsed.skills as string[]).map(String) : [],
       education: parsed.education ? String(parsed.education) : undefined,
       achievements: parsed.achievements ? String(parsed.achievements) : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Parses a raw pasted job description into structured hiring requirements,
+// for the /jobs page's "Extract Requirements" action.
+export async function parseJobDescription(jobDescriptionText: string): Promise<ParsedJobRequirements | null> {
+  const prompt = `Extract structured hiring requirements from this job description.
+
+Job Description: ${jobDescriptionText.slice(0, 6000)}
+
+Respond ONLY with valid JSON, omitting any field with no real data:
+{"minExperienceYears": number, "maxExperienceYears": number, "techStack": ["..."], "skills": ["..."], "requiredEmploymentStatus": "...", "requiredNoticePeriod": "...", "requiredLocation": "...", "requiredEmploymentType": "...", "otherCriteria": "any other important hiring criteria not captured above"}
+If there is no real hiring content in this text at all, respond with: null`;
+
+  const message = await getClient().chat.completions.create({
+    model: "meta-llama/llama-3.3-70b-instruct",
+    max_tokens: 500,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const text = message.choices[0]?.message?.content?.trim();
+  if (!text || text === "null") return null;
+  try {
+    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    return {
+      minExperienceYears: typeof parsed.minExperienceYears === "number" ? parsed.minExperienceYears : undefined,
+      maxExperienceYears: typeof parsed.maxExperienceYears === "number" ? parsed.maxExperienceYears : undefined,
+      techStack: Array.isArray(parsed.techStack) ? (parsed.techStack as string[]).map(String) : [],
+      skills: Array.isArray(parsed.skills) ? (parsed.skills as string[]).map(String) : [],
+      requiredEmploymentStatus: parsed.requiredEmploymentStatus ? String(parsed.requiredEmploymentStatus) : undefined,
+      requiredNoticePeriod: parsed.requiredNoticePeriod ? String(parsed.requiredNoticePeriod) : undefined,
+      requiredLocation: parsed.requiredLocation ? String(parsed.requiredLocation) : undefined,
+      requiredEmploymentType: parsed.requiredEmploymentType ? String(parsed.requiredEmploymentType) : undefined,
+      otherCriteria: parsed.otherCriteria ? String(parsed.otherCriteria) : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export interface CandidateMatchInput {
+  candidateName?: string;
+  candidateRole?: string;
+  candidateExperience?: string;
+  candidateSkills: string[];
+  candidateEmploymentStatus?: string;
+  candidateNoticePeriod?: string;
+  candidateLocation?: string;
+  candidateEmploymentType?: string;
+  subject: string;
+  summary: string;
+  keyPoints: string[];
+}
+
+// Scores one candidate against a job's requirements. Missing candidate fields
+// are UNKNOWN, never treated as a mismatch — the prompt says so explicitly.
+// Wrapped in try/catch (unlike evaluateCandidate) since this runs unattended
+// in POST /api/jobs/[id]/scan's bulk loop — one bad response must not abort the scan.
+export async function matchCandidateToJob(
+  candidate: CandidateMatchInput,
+  job: ParsedJobRequirements & { title: string }
+): Promise<JobMatchResult | null> {
+  try {
+    const fmt = (v?: string | null) => (v && v.trim() ? v : "Not specified");
+    const prompt = `You are matching a job candidate against a job posting. Missing/unspecified candidate details are UNKNOWN, not a mismatch — never reduce the score just because a field wasn't extracted.
+
+JOB: ${job.title}
+Required experience: ${job.minExperienceYears ?? "not specified"}${job.maxExperienceYears ? `–${job.maxExperienceYears}` : "+"} years
+Required tech stack: ${job.techStack.join(", ") || "none specified"}
+Required skills: ${job.skills.join(", ") || "none specified"}
+Required employment status: ${fmt(job.requiredEmploymentStatus)}
+Required notice period: ${fmt(job.requiredNoticePeriod)}
+Required location: ${fmt(job.requiredLocation)}
+Required employment type: ${fmt(job.requiredEmploymentType)}
+Other criteria: ${fmt(job.otherCriteria)}
+
+CANDIDATE:
+Name: ${fmt(candidate.candidateName)} · Role: ${fmt(candidate.candidateRole)} · Experience: ${fmt(candidate.candidateExperience)}
+Skills: ${candidate.candidateSkills.join(", ") || "Not specified"}
+Employment status: ${fmt(candidate.candidateEmploymentStatus)} · Notice period: ${fmt(candidate.candidateNoticePeriod)}
+Location: ${fmt(candidate.candidateLocation)} · Employment type: ${fmt(candidate.candidateEmploymentType)}
+Email subject: ${candidate.subject}
+Email summary: ${candidate.summary}
+Key points: ${candidate.keyPoints.join("; ")}
+
+Respond ONLY with valid JSON:
+{"matchScore": 0-100, "recommendation": "Yes|No", "reasoning": "2-3 sentence explanation"}`;
+
+    const message = await getClient().chat.completions.create({
+      model: "meta-llama/llama-3.3-70b-instruct",
+      max_tokens: 400,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = message.choices[0]?.message?.content;
+    if (!text) return null;
+    const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const matchScore = typeof parsed.matchScore === "number" ? Math.max(0, Math.min(100, Math.round(parsed.matchScore))) : 0;
+    return {
+      matchScore,
+      recommendation: parsed.recommendation === "Yes" ? "Yes" : "No",
+      reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function extractEmploymentDetails(subject: string, from: string, sourceText: string): Promise<EmploymentDetails | null> {
+  const prompt = `Extract employment/logistics details for this job candidate from the text below, if mentioned.
+
+Email Subject: ${subject}
+From: ${from}
+Text: ${sourceText.slice(0, 4000)}
+
+Respond ONLY with valid JSON, omitting any field with no real data:
+{"employmentStatus": "e.g. Currently Employed, Unemployed, serving notice", "noticePeriod": "e.g. Immediate, 30 days", "location": "city/country or remote", "employmentType": "Full-time, Contract, Part-time"}
+If none of these are mentioned at all, respond with: null`;
+
+  const message = await getClient().chat.completions.create({
+    model: "meta-llama/llama-3.3-70b-instruct",
+    max_tokens: 300,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const text = message.choices[0]?.message?.content?.trim();
+  if (!text || text === "null") return null;
+  try {
+    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    return {
+      employmentStatus: parsed.employmentStatus ? String(parsed.employmentStatus) : undefined,
+      noticePeriod: parsed.noticePeriod ? String(parsed.noticePeriod) : undefined,
+      location: parsed.location ? String(parsed.location) : undefined,
+      employmentType: parsed.employmentType ? String(parsed.employmentType) : undefined,
     };
   } catch {
     return null;

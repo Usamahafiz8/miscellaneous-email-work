@@ -56,6 +56,10 @@ export interface EmailSummary {
   candidateSkills: string[];
   candidateEducation?: string;
   candidateAchievements?: string;
+  candidateEmploymentStatus?: string;
+  candidateNoticePeriod?: string;
+  candidateLocation?: string;
+  candidateEmploymentType?: string;
   fetchedAt?: string;
 }
 
@@ -70,6 +74,71 @@ export interface CandidateEvaluation {
   matchScore: number;
   recommendation: "Yes" | "No";
   reasoning: string;
+}
+
+export interface ParsedJobRequirements {
+  minExperienceYears?: number;
+  maxExperienceYears?: number;
+  techStack: string[];
+  skills: string[];
+  requiredEmploymentStatus?: string;
+  requiredNoticePeriod?: string;
+  requiredLocation?: string;
+  requiredEmploymentType?: string;
+  otherCriteria?: string;
+}
+
+export interface JobPosting {
+  id: string;
+  title: string;
+  jobDescription: string | null;
+  minExperienceYears: number | null;
+  maxExperienceYears: number | null;
+  techStack: string[];
+  skills: string[];
+  requiredEmploymentStatus: string | null;
+  requiredNoticePeriod: string | null;
+  requiredLocation: string | null;
+  requiredEmploymentType: string | null;
+  otherCriteria: string | null;
+  lastScannedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { matches: number };
+}
+
+export interface JobMatchResult {
+  matchScore: number;
+  recommendation: "Yes" | "No";
+  reasoning: string;
+}
+
+// Deliberately NOT named "CandidateMatch" — @prisma/client already generates
+// a CandidateMatch model type; colliding both under one name forces awkward
+// aliasing anywhere a route needs both the DB row type and this client DTO.
+export interface JobCandidateMatch {
+  id: string;
+  jobPostingId: string;
+  emailId: string;
+  matchScore: number;
+  recommendation: "Yes" | "No";
+  reasoning: string;
+  matchedAt: string;
+  emailSummary: {
+    emailId: string; from: string; subject: string; date: string;
+    candidateName: string | null; candidateRole: string | null; candidateExperience: string | null;
+    candidateSkills: string[];
+    candidateEmploymentStatus: string | null; candidateNoticePeriod: string | null;
+    candidateLocation: string | null; candidateEmploymentType: string | null;
+    stage: string; tags: string[];
+  };
+}
+
+export interface EmploymentDetails {
+  employmentStatus?: string;
+  noticePeriod?: string;
+  location?: string;
+  employmentType?: string;
 }
 
 export interface ProcessEmailsRequest {
@@ -119,12 +188,14 @@ export interface EmailListQuery {
   page: number;
   pageSize: number;
   search?: string;
+  keywords?: string;
   category?: Category[];
   priority?: Priority[];
   status?: EmailStatus[];
   actionRequired?: ActionRequired[];
   stage?: Stage[];
   tags?: string[];
+  skills?: string[];
   dateFrom?: string;
   dateTo?: string;
   sortBy?: SortField;

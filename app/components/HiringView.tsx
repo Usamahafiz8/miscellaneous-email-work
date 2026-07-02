@@ -47,6 +47,8 @@ interface HiringFilterBag {
   statusFilter: string[];
   dateFrom?: string;
   dateTo?: string;
+  skillFilter: string[];
+  keywords: string;
 }
 
 // ─── Score ring ──────────────────────────────────────────────────────────────
@@ -83,7 +85,7 @@ export default function HiringView() {
   const selectedId = pathname.startsWith("/hiring/") ? decodeURIComponent(pathname.slice("/hiring/".length)) : undefined;
   const {
     counts, syncEmails, isSyncing, syncVersion,
-    loadingDetailId, loadEmailDetail, getEmailDetail, patchEmail, availableTags,
+    loadingDetailId, loadEmailDetail, getEmailDetail, patchEmail, availableTags, availableSkills,
   } = useDashboard();
 
   const [criteria, setCriteria] = useState<HiringCriteria>({ position: "", mandatory: [], optional: [] });
@@ -97,10 +99,13 @@ export default function HiringView() {
   // not persisted to the DB), so it necessarily filters the current page only.
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [keywordsInput, setKeywordsInput] = useState("");
+  const [debouncedKeywords, setDebouncedKeywords] = useState("");
   const [candidateFilter, setCandidateFilter] = useState<"" | "unevaluated" | "high" | "medium" | "low">("");
   const [stageFilter, setStageFilter] = useState<string[]>([]);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [skillFilter, setSkillFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState<string | undefined>(undefined);
   const [dateTo, setDateTo] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
@@ -117,7 +122,12 @@ export default function HiringView() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, stageFilter, tagFilter, statusFilter, dateFrom, dateTo, sort]);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedKeywords(keywordsInput), 300);
+    return () => clearTimeout(t);
+  }, [keywordsInput]);
+
+  useEffect(() => { setPage(1); }, [debouncedSearch, stageFilter, tagFilter, statusFilter, dateFrom, dateTo, sort, skillFilter, debouncedKeywords]);
 
   const fetchPage = useCallback(async () => {
     setIsLoading(true);
@@ -129,6 +139,8 @@ export default function HiringView() {
     stageFilter.forEach((s) => params.append("stage", s));
     tagFilter.forEach((t) => params.append("tag", t));
     statusFilter.forEach((s) => params.append("status", s));
+    skillFilter.forEach((s) => params.append("skill", s));
+    if (debouncedKeywords) params.set("keywords", debouncedKeywords);
     if (dateFrom) params.set("dateFrom", dateFrom);
     if (dateTo) params.set("dateTo", dateTo);
     params.set("sortBy", sort.field);
@@ -143,7 +155,7 @@ export default function HiringView() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, debouncedSearch, stageFilter, tagFilter, statusFilter, dateFrom, dateTo, sort]);
+  }, [page, pageSize, debouncedSearch, stageFilter, tagFilter, statusFilter, dateFrom, dateTo, sort, skillFilter, debouncedKeywords]);
 
   useEffect(() => {
     fetchPage();
@@ -162,11 +174,11 @@ export default function HiringView() {
     router.push(`/hiring/${encodeURIComponent(rows[0].emailId)}`);
   }, [rows, selectedId, router]);
 
-  const hasFilters = !!(searchInput.trim() || candidateFilter || stageFilter.length || tagFilter.length || statusFilter.length || dateFrom || dateTo);
+  const hasFilters = !!(searchInput.trim() || candidateFilter || stageFilter.length || tagFilter.length || statusFilter.length || dateFrom || dateTo || skillFilter.length || debouncedKeywords);
   // True while a request this bar triggered (search debounce/fetch, a filter
   // change, pagination) hasn't landed yet — not just while typing a search term.
   const isBusy = isLoading || searchInput !== debouncedSearch;
-  const busyLabel = searchInput.trim() ? "Searching…" : (stageFilter.length || tagFilter.length || statusFilter.length || dateFrom || dateTo) ? "Filtering…" : "Loading…";
+  const busyLabel = searchInput.trim() ? "Searching…" : (stageFilter.length || tagFilter.length || statusFilter.length || dateFrom || dateTo || skillFilter.length || debouncedKeywords) ? "Filtering…" : "Loading…";
   // Evaluations live only in this session's state (not the DB), so whether a
   // candidate's been scored has nothing to do with which page is loaded.
   const hasEvaluations = useMemo(() => Array.from(evaluations.values()).some((e) => e.result), [evaluations]);
@@ -290,11 +302,13 @@ export default function HiringView() {
     setStatusFilter([]);
     setDateFrom(undefined);
     setDateTo(undefined);
+    setSkillFilter([]);
+    setKeywordsInput("");
   }
 
   // Deliberately excludes candidateFilter/job-criteria state — those are
   // session-only evaluation state, not list filters worth saving as a preset.
-  const currentFilterBag: HiringFilterBag = { search: searchInput, stageFilter, tagFilter, statusFilter, dateFrom, dateTo };
+  const currentFilterBag: HiringFilterBag = { search: searchInput, stageFilter, tagFilter, statusFilter, dateFrom, dateTo, skillFilter, keywords: keywordsInput };
   function applyFilterPreset(f: HiringFilterBag) {
     setSearchInput(f.search);
     setStageFilter(f.stageFilter);
@@ -302,6 +316,8 @@ export default function HiringView() {
     setStatusFilter(f.statusFilter);
     setDateFrom(f.dateFrom);
     setDateTo(f.dateTo);
+    setSkillFilter(f.skillFilter);
+    setKeywordsInput(f.keywords);
   }
 
   // Tabular (spreadsheet) candidate grid: full column set when the list has the
@@ -321,12 +337,16 @@ export default function HiringView() {
       ),
     },
     {
+      key: "candidateExperience", header: "Experience", width: "110px",
+      render: (c) => <span className="truncate block text-xs text-gray-700">{c.email.candidateExperience ?? "—"}</span>,
+    },
+    {
       key: "subject", header: "Position",
       render: (c) => <span className="truncate block text-xs text-gray-700">{c.email.subject || "(No Subject)"}</span>,
     },
     {
       key: "summary", header: "AI Summary", width: "260px",
-      render: (c) => <span className="truncate block text-xs text-gray-500">{c.email.summary}</span>,
+      render: (c) => <span className="block text-xs text-gray-500 whitespace-normal break-words py-1">{c.email.summary}</span>,
     },
     {
       key: "matchScore", header: "Match", width: "80px",
@@ -478,12 +498,24 @@ export default function HiringView() {
           onChange={setTagFilter}
         />
         <MultiSelectFilter
+          label="Skills"
+          options={availableSkills.map((s) => ({ value: s, label: s }))}
+          selected={skillFilter}
+          onChange={setSkillFilter}
+        />
+        <MultiSelectFilter
           label="Status"
           options={STATUSES.map((s) => ({ value: s, label: s }))}
           selected={statusFilter}
           onChange={setStatusFilter}
         />
         <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onApply={(f, t) => { setDateFrom(f); setDateTo(t); }} />
+        <input
+          value={keywordsInput}
+          onChange={(e) => setKeywordsInput(e.target.value)}
+          placeholder="Keywords (key points & skills)…"
+          className="text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors w-48"
+        />
 
         <div className="flex items-center gap-1.5 flex-wrap">
           {FILTER_PILLS.filter(p => p.value === "" || p.value === "unevaluated" || hasEvaluations).map(p => (

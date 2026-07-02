@@ -14,6 +14,8 @@ function toEmailSummary(row: {
   candidateName: string | null; candidateRole: string | null;
   candidateExperience: string | null; candidateSkills: string[];
   candidateEducation: string | null; candidateAchievements: string | null;
+  candidateEmploymentStatus: string | null; candidateNoticePeriod: string | null;
+  candidateLocation: string | null; candidateEmploymentType: string | null;
 }, opts: { stripAttachmentData?: boolean } = {}): EmailSummary {
   let attachments: EmailAttachment[] | undefined;
   if (row.attachments) {
@@ -52,6 +54,10 @@ function toEmailSummary(row: {
     candidateSkills: row.candidateSkills,
     candidateEducation: row.candidateEducation ?? undefined,
     candidateAchievements: row.candidateAchievements ?? undefined,
+    candidateEmploymentStatus: row.candidateEmploymentStatus ?? undefined,
+    candidateNoticePeriod: row.candidateNoticePeriod ?? undefined,
+    candidateLocation: row.candidateLocation ?? undefined,
+    candidateEmploymentType: row.candidateEmploymentType ?? undefined,
     fetchedAt: row.fetchedAt.toISOString(),
   };
 }
@@ -70,10 +76,11 @@ const LIST_SELECT = {
   stage: true, tags: true,
   candidateName: true, candidateRole: true, candidateExperience: true,
   candidateSkills: true, candidateEducation: true, candidateAchievements: true,
+  candidateEmploymentStatus: true, candidateNoticePeriod: true, candidateLocation: true, candidateEmploymentType: true,
 } as const;
 
 export async function getCachedSummaries(query: EmailListQuery): Promise<EmailListResult> {
-  const { page, pageSize, search, category, priority, status, actionRequired, stage, tags, dateFrom, dateTo, sortBy = "date", sortOrder = "desc" } = query;
+  const { page, pageSize, search, keywords, category, priority, status, actionRequired, stage, tags, skills, dateFrom, dateTo, sortBy = "date", sortOrder = "desc" } = query;
 
   const where: Prisma.EmailSummaryWhereInput = {};
   if (search?.trim()) {
@@ -102,6 +109,7 @@ export async function getCachedSummaries(query: EmailListQuery): Promise<EmailLi
   if (actionRequired?.length) where.actionRequired = { in: actionRequired };
   if (stage?.length) where.stage = { in: stage };
   if (tags?.length) where.tags = { hasSome: tags };
+  if (skills?.length) where.candidateSkills = { hasSome: skills };
   if (dateFrom || dateTo) {
     // `date` is a String column (always populated via .toISOString() in lib/imap.ts),
     // so lexical gte/lte sorts correctly. A bare dateTo would exclude same-day
@@ -110,6 +118,18 @@ export async function getCachedSummaries(query: EmailListQuery): Promise<EmailLi
       ...(dateFrom && { gte: dateFrom }),
       ...(dateTo && { lte: `${dateTo}T23:59:59.999Z` }),
     };
+  }
+  if (keywords?.trim()) {
+    // candidateSkills/keyPoints are Postgres arrays — Prisma's query builder can't
+    // substring-match inside array elements, so resolve matching IDs via raw SQL
+    // first, then fold them into the where object like every other filter here.
+    const kw = `%${keywords.trim()}%`;
+    const matches = await prisma.$queryRaw<{ emailId: string }[]>(Prisma.sql`
+      SELECT "emailId" FROM email_summaries
+      WHERE array_to_string("keyPoints", ' ') ILIKE ${kw}
+         OR array_to_string("candidateSkills", ' ') ILIKE ${kw}
+    `);
+    where.emailId = { in: matches.map((m) => m.emailId) };
   }
 
   const orderBy: Prisma.EmailSummaryOrderByWithRelationInput = { [sortBy]: sortOrder };
@@ -154,6 +174,15 @@ export async function getDistinctTags(): Promise<string[]> {
     SELECT DISTINCT unnest(tags) AS tag FROM email_summaries ORDER BY tag
   `;
   return rows.map((r) => r.tag);
+}
+
+// Distinct AI-extracted skills across all candidates, for the skills filter's
+// option list. Cheap: unnest + distinct over a GIN-indexed array column.
+export async function getDistinctSkills(): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ skill: string }[]>`
+    SELECT DISTINCT unnest("candidateSkills") AS skill FROM email_summaries ORDER BY skill
+  `;
+  return rows.map((r) => r.skill);
 }
 
 export async function getExistingEmailIds(ids: string[]): Promise<Set<string>> {
@@ -214,6 +243,10 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
           candidateSkills: s.candidateSkills ?? [],
           candidateEducation: s.candidateEducation ?? null,
           candidateAchievements: s.candidateAchievements ?? null,
+          candidateEmploymentStatus: s.candidateEmploymentStatus ?? null,
+          candidateNoticePeriod: s.candidateNoticePeriod ?? null,
+          candidateLocation: s.candidateLocation ?? null,
+          candidateEmploymentType: s.candidateEmploymentType ?? null,
         },
         create: {
           emailId: s.emailId,
@@ -239,6 +272,10 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
           candidateSkills: s.candidateSkills ?? [],
           candidateEducation: s.candidateEducation ?? null,
           candidateAchievements: s.candidateAchievements ?? null,
+          candidateEmploymentStatus: s.candidateEmploymentStatus ?? null,
+          candidateNoticePeriod: s.candidateNoticePeriod ?? null,
+          candidateLocation: s.candidateLocation ?? null,
+          candidateEmploymentType: s.candidateEmploymentType ?? null,
         },
       })
     ),

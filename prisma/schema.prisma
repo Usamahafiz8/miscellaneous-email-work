@@ -38,7 +38,17 @@ model EmailSummary {
   candidateEducation    String?
   candidateAchievements String?
 
+  // AI-extracted employment/logistics details, for matching against a
+  // JobPosting's requirements on the /jobs page. Same free-text philosophy
+  // as candidateRole/candidateExperience — too varied for enums.
+  candidateEmploymentStatus String?
+  candidateNoticePeriod     String?
+  candidateLocation         String?
+  candidateEmploymentType   String?
+
   fetchedAt      DateTime @default(now())
+
+  matches CandidateMatch[]
 
   @@index([date(sort: Desc)])
   @@index([category])
@@ -47,4 +57,51 @@ model EmailSummary {
   @@index([actionRequired])
   @@index([stage])
   @@map("email_summaries")
+}
+
+// A saved job posting on the /jobs page — HR pastes a job description, AI
+// extracts structured requirements below, HR can edit/add to them, then
+// scans all Hiring candidates for a match score (see CandidateMatch).
+model JobPosting {
+  id             String  @id @default(cuid())
+  title          String
+  jobDescription String?
+
+  minExperienceYears       Int?
+  maxExperienceYears       Int?
+  techStack                String[] @default([])
+  skills                   String[] @default([])
+  requiredEmploymentStatus String?
+  requiredNoticePeriod     String?
+  requiredLocation         String?
+  requiredEmploymentType   String?
+  otherCriteria            String?
+
+  lastScannedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  matches CandidateMatch[]
+
+  @@map("job_postings")
+}
+
+// One AI-computed match result for a (JobPosting, candidate email) pair.
+// Re-scanning a job upserts these rows rather than duplicating them.
+model CandidateMatch {
+  id           String       @id @default(cuid())
+  jobPostingId String
+  jobPosting   JobPosting   @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  emailId      String
+  emailSummary EmailSummary @relation(fields: [emailId], references: [emailId], onDelete: Cascade)
+
+  matchScore     Int
+  recommendation String // "Yes" | "No" — plain string, matching this codebase's
+                         // existing convention (Category/Priority/Sentiment aren't native enums either)
+  reasoning      String
+  matchedAt      DateTime @default(now())
+
+  @@unique([jobPostingId, emailId])
+  @@index([jobPostingId, matchScore])
+  @@map("candidate_matches")
 }
