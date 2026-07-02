@@ -29,7 +29,7 @@ export type Category = "Hiring" | "Client Support" | "Sales" | "Finance" | "Inte
 export type Priority = "Critical" | "High" | "Medium" | "Low";
 export type ActionRequired = "Yes" | "No";
 export type EmailStatus = "New" | "Open" | "Closed";
-export type NavView = "home" | "inbox" | "hiring";
+export type Stage = "New" | "Shortlisted" | "Interviewing" | "Offer" | "Rejected" | "Hired";
 
 export interface EmailSummary {
   emailId: string;
@@ -48,6 +48,14 @@ export interface EmailSummary {
   actionRequired: ActionRequired;
   purpose: string;
   status: EmailStatus;
+  stage: Stage;
+  tags: string[];
+  candidateName?: string;
+  candidateRole?: string;
+  candidateExperience?: string;
+  candidateSkills: string[];
+  candidateEducation?: string;
+  candidateAchievements?: string;
   fetchedAt?: string;
 }
 
@@ -100,3 +108,30 @@ export type ProviderKey = keyof typeof IMAP_PROVIDERS;
 export const CATEGORIES: Category[] = ["Hiring", "Client Support", "Sales", "Finance", "Internal", "Marketing", "Technical", "General"];
 export const PRIORITIES: Priority[] = ["Critical", "High", "Medium", "Low"];
 export const STATUSES: EmailStatus[] = ["New", "Open", "Closed"];
+export const STAGES: Stage[] = ["New", "Shortlisted", "Interviewing", "Offer", "Rejected", "Hired"];
+
+// ─── Server-side list filtering/sorting/pagination ─────────────────────────
+
+export type SortField = "date" | "priorityRank" | "status" | "category" | "from" | "subject";
+export type SortOrder = "asc" | "desc";
+
+export interface EmailListQuery {
+  page: number;
+  pageSize: number;
+  search?: string;
+  category?: Category[];
+  priority?: Priority[];
+  status?: EmailStatus[];
+  actionRequired?: ActionRequired[];
+  stage?: Stage[];
+  tags?: string[];
+  sortBy?: SortField;
+  sortOrder?: SortOrder;
+}
+
+export interface EmailListResult {
+  summaries: EmailSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

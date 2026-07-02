@@ -1,13 +1,15 @@
 "use client";
 
-import type { EmailSummary, NavView, Priority, Category } from "@/lib/types";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { EmailSummary, Priority, Category } from "@/lib/types";
+import DataTable from "./DataTable";
 
 interface DashboardHomeProps {
   summaries: EmailSummary[];
   isLoading: boolean;
   lastFetched: string | null;
   onFetch: () => void;
-  onNavigate: (v: NavView) => void;
 }
 
 const PRIORITY_COLOR: Record<Priority, string> = {
@@ -80,8 +82,8 @@ interface StatCardProps {
 
 function StatCard({ label, value, sub, iconClass, icon }: StatCardProps) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-5">
-      <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-4 ${iconClass}`}>
+    <div className="bg-white rounded-2xl border border-gray-200 p-4">
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${iconClass}`}>
         {icon}
       </div>
       <p className="text-2xl font-bold text-gray-900">{value}</p>
@@ -91,7 +93,8 @@ function StatCard({ label, value, sub, iconClass, icon }: StatCardProps) {
   );
 }
 
-export default function DashboardHome({ summaries, isLoading, lastFetched, onFetch, onNavigate }: DashboardHomeProps) {
+export default function DashboardHome({ summaries, isLoading, lastFetched, onFetch }: DashboardHomeProps) {
+  const router = useRouter();
   const total = summaries.length;
   const unread = summaries.filter(s => s.status === "New").length;
   const openEmails = summaries.filter(s => s.status === "Open").length;
@@ -127,6 +130,23 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
 
   const recent = summaries.slice(0, 8);
 
+  // Gmail-style single-line row, matching Inbox/Hiring's list styling.
+  function renderRecentRow(email: EmailSummary) {
+    return (
+      <div className="flex items-center gap-3 min-w-0">
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PRIORITY_COLOR[email.priority]}`} title={`${email.priority} priority`} />
+        <span className="flex-1 min-w-0 truncate text-xs">
+          <span className={email.status === "New" ? "font-semibold text-gray-900" : "text-gray-700"}>{email.subject || "(No Subject)"}</span>
+          <span className="text-gray-400"> — {email.from}</span>
+        </span>
+        <span className={`flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${CATEGORY_COLOR[email.category]?.badge ?? "bg-gray-100 text-gray-600"}`}>
+          {email.category}
+        </span>
+        <span className="w-14 flex-shrink-0 text-right text-xs text-gray-400 whitespace-nowrap">{formatRelative(email.date)}</span>
+      </div>
+    );
+  }
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
@@ -156,7 +176,7 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
         </div>
       </div>
 
-      <div className="p-6 sm:p-8 space-y-6">
+      <div className="p-6 sm:p-8 space-y-5">
 
         {/* Empty state */}
         {!isLoading && total === 0 && (
@@ -240,9 +260,9 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
                       </div>
                       {todayImportant.length > 5 && (
                         <div className="px-5 pb-3 pt-1">
-                          <button onClick={() => onNavigate("inbox")} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+                          <Link href="/inbox" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
                             +{todayImportant.length - 5} more → View inbox
-                          </button>
+                          </Link>
                         </div>
                       )}
                     </div>
@@ -278,33 +298,23 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
               <div className="xl:col-span-2 bg-white rounded-2xl border border-gray-200 overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                   <h2 className="font-semibold text-gray-900 text-sm">Recent Emails</h2>
-                  <button onClick={() => onNavigate("inbox")} className="text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors">
+                  <Link href="/inbox" className="text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors">
                     View all →
-                  </button>
+                  </Link>
                 </div>
-                <div className="divide-y divide-gray-50">
-                  {recent.map((email) => (
-                    <div key={email.emailId} className="flex items-start gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors cursor-default">
-                      <span className={`mt-2 w-2 h-2 rounded-full flex-shrink-0 ${PRIORITY_COLOR[email.priority]}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <p className={`text-sm truncate ${email.status === "New" ? "font-semibold text-gray-900" : "text-gray-700"}`}>
-                            {email.subject || "(No Subject)"}
-                          </p>
-                          <span className="text-xs text-gray-400 flex-shrink-0">{formatRelative(email.date)}</span>
-                        </div>
-                        <p className="text-xs text-gray-400 truncate mt-0.5">{email.from}</p>
-                      </div>
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5 ${CATEGORY_COLOR[email.category]?.badge ?? "bg-gray-100 text-gray-600"}`}>
-                        {email.category}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <DataTable
+                  variant="list"
+                  renderRow={renderRecentRow}
+                  rows={recent}
+                  rowKey={(email) => email.emailId}
+                  onRowClick={(email) => router.push(`/inbox/${encodeURIComponent(email.emailId)}`)}
+                  fillHeight={false}
+                  emptyState={<p className="text-sm text-gray-400 py-8">No emails yet</p>}
+                />
                 <div className="px-5 py-3 border-t border-gray-50">
-                  <button onClick={() => onNavigate("inbox")} className="text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors">
+                  <Link href="/inbox" className="text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors">
                     Open inbox →
-                  </button>
+                  </Link>
                 </div>
               </div>
 
@@ -336,10 +346,10 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
                   </div>
                 )}
                 {hiring > 0 && (
-                  <button onClick={() => onNavigate("hiring")}
-                    className="mt-5 w-full py-2 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-xl transition-colors">
+                  <Link href="/hiring"
+                    className="mt-5 block w-full text-center py-2 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-xl transition-colors">
                     Review {hiring} hiring application{hiring > 1 ? "s" : ""} →
-                  </button>
+                  </Link>
                 )}
               </div>
             </div>

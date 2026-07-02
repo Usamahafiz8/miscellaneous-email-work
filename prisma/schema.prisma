@@ -16,6 +16,7 @@ model EmailSummary {
   sentiment      String
   category       String
   priority       String
+  priorityRank   Int      @default(2) // Critical=0, High=1, Medium=2, Low=3 — lets Prisma orderBy sort priority correctly (plain string sort would go alphabetical)
   actionRequired String
   purpose        String
   body           String?
@@ -23,8 +24,27 @@ model EmailSummary {
   attachments       String?  // JSON: EmailAttachment[]
   attachmentSummary String?  // AI-generated summary of PDF attachment content
   status            String   @default("New")
+  stage             String   @default("New") // hiring pipeline folder — only meaningful when category="Hiring"
+  tags              String[] @default([])    // free-form, user-added, any email
+
+  // Structured candidate profile — scalar columns (not a Json blob) so the
+  // Candidate Sheet can render/sort/filter each field directly, the same way
+  // keyPoints already works. Populated by the AI batch prompt for Hiring
+  // emails (with or without a PDF attachment); null for everything else.
+  candidateName         String?
+  candidateRole         String?
+  candidateExperience   String?
+  candidateSkills       String[] @default([])
+  candidateEducation    String?
+  candidateAchievements String?
+
   fetchedAt      DateTime @default(now())
 
   @@index([date(sort: Desc)])
+  @@index([category])
+  @@index([priorityRank])
+  @@index([status])
+  @@index([actionRequired])
+  @@index([stage])
   @@map("email_summaries")
 }

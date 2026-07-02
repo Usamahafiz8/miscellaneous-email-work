@@ -29,16 +29,31 @@ export default function PdfViewer({ attachment }: { attachment: EmailAttachment 
           <span className="text-xs font-medium text-gray-700 truncate">{attachment.filename}</span>
           <span className="text-[10px] text-gray-400 flex-shrink-0">({(attachment.size / 1024).toFixed(0)} KB)</span>
         </div>
-        <a
-          href={blobUrl}
-          download={attachment.filename}
-          className="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 flex-shrink-0 ml-2"
-        >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Download
-        </a>
+        <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+          {/* Inline preview relies on <embed>, which many mobile browsers and
+              in-app webviews don't support — this link always works as a fallback. */}
+          <a
+            href={blobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-800"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            Open in new tab
+          </a>
+          <a
+            href={blobUrl}
+            download={attachment.filename}
+            className="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-800"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download
+          </a>
+        </div>
       </div>
       <embed src={blobUrl} type="application/pdf" className="w-full" style={{ height: "460px" }} />
     </div>

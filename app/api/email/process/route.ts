@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { fetchEmails } from "@/lib/imap";
 import { summarizeEmails } from "@/lib/claude";
 import { cacheSummaries, getCachedSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
+import { parseEmailListQuery } from "@/lib/queryParams";
 import type { SummaryLength } from "@/lib/types";
 
 // Allow up to 5 minutes — required for Vercel Pro; on Hobby plan cap is 60s
@@ -11,21 +12,15 @@ const PAGE_SIZE = 50;
 // Max new emails to summarize per single sync call — keeps the request under timeout
 const NEW_EMAIL_BATCH = 15;
 
-// Load emails from DB only — no IMAP, no AI calls
+// Load emails from DB only — no IMAP, no AI calls. Supports the same
+// filter/sort/page query contract as GET /api/summaries.
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const offset = Math.max(0, Number(searchParams.get("offset") ?? 0));
+  const query = parseEmailListQuery(searchParams);
 
   try {
-    const { summaries, total } = await getCachedSummaries(PAGE_SIZE, offset);
-    return NextResponse.json({
-      success: true,
-      summaries,
-      emailCount: summaries.length,
-      totalCount: total,
-      offset,
-      fromCache: true,
-    });
+    const result = await getCachedSummaries(query);
+    return NextResponse.json({ success: true, ...result, fromCache: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load from database";
     return NextResponse.json({ success: false, error: message }, { status: 500 });

@@ -1,5 +1,22 @@
-import Dashboard from "./components/Dashboard";
+"use client";
+
+import { useEffect } from "react";
+import { useDashboard } from "./components/DashboardProvider";
+import DashboardHome from "./components/DashboardHome";
 
 export default function Home() {
-  return <Dashboard />;
+  const { overviewSummaries, isOverviewLoading, isSyncing, lastFetched, syncEmails, loadOverviewIfNeeded } = useDashboard();
+
+  // Lazy — only fetches the (fairly heavy, unfiltered) overview dataset once
+  // Home is actually visited, instead of on every app load regardless of page.
+  useEffect(() => { loadOverviewIfNeeded(); }, [loadOverviewIfNeeded]);
+
+  return (
+    <DashboardHome
+      summaries={overviewSummaries}
+      isLoading={isOverviewLoading || isSyncing}
+      lastFetched={lastFetched}
+      onFetch={syncEmails}
+    />
+  );
 }

@@ -1,18 +1,16 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import type { EmailSummary, HiringCriteria, CandidateEvaluation } from "@/lib/types";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import type { EmailSummary, EmailStatus, Stage, HiringCriteria, CandidateEvaluation } from "@/lib/types";
+import { STAGES } from "@/lib/types";
 import { formatRelative, formatFull, parseSender, avatarGradient } from "@/lib/utils";
+import { useDashboard } from "./DashboardProvider";
+import DataTable from "./DataTable";
 import PdfViewer from "./PdfViewer";
 import EmailInsightsPanel from "./EmailInsightsPanel";
-
-interface HiringViewProps {
-  summaries: EmailSummary[];
-  isLoading: boolean;
-  onFetch: () => void;
-  onLoadDetail: (emailId: string) => void;
-  loadingDetailId: string | null;
-}
+import LinkifiedText from "./LinkifiedText";
+import TagInput from "./TagInput";
 
 interface EvalState {
   loading: boolean;
@@ -20,35 +18,15 @@ interface EvalState {
   error: string | null;
 }
 
-// ─── Tag input ───────────────────────────────────────────────────────────────
+const FILTER_PILLS: { value: "" | "unevaluated" | "high" | "medium" | "low"; label: string }[] = [
+  { value: "", label: "All" },
+  { value: "unevaluated", label: "Needs review" },
+  { value: "high", label: "Strong match" },
+  { value: "medium", label: "Possible match" },
+  { value: "low", label: "Weak match" },
+];
 
-function TagInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder: string }) {
-  const [input, setInput] = useState("");
-  const add = () => {
-    const v = input.trim();
-    if (v && !value.includes(v)) onChange([...value, v]);
-    setInput("");
-  };
-  return (
-    <div>
-      <div className="flex gap-2 mb-2 flex-wrap">
-        {value.map(tag => (
-          <span key={tag} className="flex items-center gap-1 text-xs bg-violet-100 text-violet-700 rounded-full px-2.5 py-1 font-medium">
-            {tag}
-            <button type="button" onClick={() => onChange(value.filter(t => t !== tag))} className="hover:text-red-500 ml-0.5 leading-none">×</button>
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <input value={input} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          placeholder={placeholder}
-          className="flex-1 text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400" />
-        <button type="button" onClick={add} className="px-3 py-2 rounded-lg bg-gray-100 text-sm text-gray-600 hover:bg-gray-200 transition-colors">Add</button>
-      </div>
-    </div>
-  );
-}
+type Candidate = { email: EmailSummary; mand: number; opt: number; eval: CandidateEvaluation | null };
 
 // ─── Score ring ──────────────────────────────────────────────────────────────
 
@@ -73,53 +51,109 @@ function ScoreRing({ score }: { score: number }) {
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
-export default function HiringView({ summaries, isLoading, onFetch, onLoadDetail, loadingDetailId }: HiringViewProps) {
-  const [criteria, setCriteria] = useState<HiringCriteria>({ position: "", mandatory: [], optional: [] });
-  const [criteriaOpen, setCriteriaOpen] = useState(true);
+export default function HiringView() {
+  const router = useRouter();
+  const pathname = usePathname();
+  // Derived directly from the URL rather than passed down from page.tsx params —
+  // this component now lives in a layout (see app/hiring/layout.tsx), which Next.js
+  // keeps mounted across /hiring <-> /hiring/[emailId] navigations, so all local
+  // state (filters, page, search, evaluations) survives opening/closing a candidate
+  // instead of resetting and refetching on every click.
+  const selectedId = pathname.startsWith("/hiring/") ? decodeURIComponent(pathname.slice("/hiring/".length)) : undefined;
+  const searchParams = useSearchParams();
+  const activeStage = searchParams.get("stage");
+  const {
+    syncEmails, isSyncing, syncVersion,
+    loadingDetailId, loadEmailDetail, getEmailDetail, patchEmail, availableTags,
+  } = useDashboard();
+
+  const [criteria] = useState<HiringCriteria>({ position: "", mandatory: [], optional: [] });
   const [evaluations, setEvaluations] = useState<Map<string, EvalState>>(new Map());
   const [isEvaluatingAll, setIsEvaluatingAll] = useState(false);
-  const [selected, setSelected] = useState<EmailSummary | null>(null);
   const [detailTab, setDetailTab] = useState<"insights" | "email">("insights");
 
-  // Candidate filters
-  const [search, setSearch] = useState("");
-  const [filterEval, setFilterEval] = useState<"" | "evaluated" | "unevaluated">("");
-  const [filterMatch, setFilterMatch] = useState<"" | "high" | "medium" | "low">("");
+  // Candidate filters — search hits the server (correct across the whole mailbox);
+  // the status/match pill only ever reflects THIS session's evaluations (they're
+  // not persisted to the DB), so it necessarily filters the current page only.
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [candidateFilter, setCandidateFilter] = useState<"" | "unevaluated" | "high" | "medium" | "low">("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
-  const hasFilters = !!(search.trim() || filterEval || filterMatch);
+  const [rows, setRows] = useState<EmailSummary[]>([]);
+  const [total, setTotal] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => { setPage(1); }, [debouncedSearch, activeStage]);
+
+  const fetchPage = useCallback(async () => {
+    setIsLoading(true);
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("pageSize", String(pageSize));
+    params.append("category", "Hiring");
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (activeStage) params.append("stage", activeStage);
+    params.set("sortBy", "date");
+    params.set("sortOrder", "desc");
+    try {
+      const res = await fetch(`/api/email/process?${params.toString()}`);
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        setRows(data.summaries ?? []);
+        setTotal(data.total ?? 0);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, pageSize, debouncedSearch, activeStage]);
+
+  useEffect(() => {
+    fetchPage();
+    setSelectedIds(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchPage, syncVersion]);
+
+  // Auto-open the first candidate once, so the split view shows list + detail
+  // together without requiring an initial click. Only fires once per session.
+  const hasAutoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoSelectedRef.current) return;
+    if (selectedId) { hasAutoSelectedRef.current = true; return; }
+    if (rows.length === 0) return;
+    hasAutoSelectedRef.current = true;
+    router.push(`/hiring/${encodeURIComponent(rows[0].emailId)}`);
+  }, [rows, selectedId, router]);
+
+  const hasFilters = !!(searchInput.trim() || candidateFilter);
+  // Evaluations live only in this session's state (not the DB), so whether a
+  // candidate's been scored has nothing to do with which page is loaded.
+  const hasEvaluations = useMemo(() => Array.from(evaluations.values()).some((e) => e.result), [evaluations]);
   const hasCriteria = !!(criteria.position.trim() && criteria.mandatory.length > 0);
 
-  const visibleCandidates = useMemo(() => {
-    const getText = (e: EmailSummary) =>
-      [e.summary, e.subject, e.from, ...e.keyPoints].join(" ").toLowerCase();
+  const visibleCandidates = useMemo<Candidate[]>(() => {
+    const getText = (e: EmailSummary) => [e.summary, e.subject, e.from, ...e.keyPoints].join(" ").toLowerCase();
+    const mandHits = (e: EmailSummary) => (hasCriteria ? criteria.mandatory.filter((r) => getText(e).includes(r.toLowerCase())).length : 0);
+    const optHits = (e: EmailSummary) => (hasCriteria ? criteria.optional.filter((r) => getText(e).includes(r.toLowerCase())).length : 0);
 
-    const mandHits = (e: EmailSummary) =>
-      hasCriteria ? criteria.mandatory.filter(r => getText(e).includes(r.toLowerCase())).length : 0;
-    const optHits = (e: EmailSummary) =>
-      hasCriteria ? criteria.optional.filter(r => getText(e).includes(r.toLowerCase())).length : 0;
-
-    let scored = summaries.map(e => ({
+    let scored: Candidate[] = rows.map((e) => ({
       email: e,
       mand: mandHits(e),
       opt: optHits(e),
       eval: evaluations.get(e.emailId)?.result ?? null,
     }));
 
-    // Search filter — name, email address, subject, summary, key points
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      scored = scored.filter(({ email }) => getText(email).includes(q));
-    }
-
-    // Evaluated / not evaluated filter
-    if (filterEval === "evaluated") scored = scored.filter(c => c.eval !== null);
-    if (filterEval === "unevaluated") scored = scored.filter(c => c.eval === null);
-
-    // Match score filter (only applies when evaluated)
-    if (filterMatch === "high") scored = scored.filter(c => c.eval && c.eval.matchScore >= 70);
-    if (filterMatch === "medium") scored = scored.filter(c => c.eval && c.eval.matchScore >= 40 && c.eval.matchScore < 70);
-    if (filterMatch === "low") scored = scored.filter(c => c.eval && c.eval.matchScore < 40);
+    if (candidateFilter === "unevaluated") scored = scored.filter((c) => c.eval === null);
+    if (candidateFilter === "high") scored = scored.filter((c) => c.eval && c.eval.matchScore >= 70);
+    if (candidateFilter === "medium") scored = scored.filter((c) => c.eval && c.eval.matchScore >= 40 && c.eval.matchScore < 70);
+    if (candidateFilter === "low") scored = scored.filter((c) => c.eval && c.eval.matchScore < 40);
 
     scored.sort((a, b) => {
       if (a.eval && b.eval) return b.eval.matchScore - a.eval.matchScore;
@@ -132,22 +166,26 @@ export default function HiringView({ summaries, isLoading, onFetch, onLoadDetail
     });
 
     return scored;
-  }, [summaries, evaluations, criteria, hasCriteria, search, filterEval, filterMatch]);
+  }, [rows, evaluations, criteria, hasCriteria, candidateFilter]);
 
-  const selectedEmail = selected
-    ? (summaries.find(s => s.emailId === selected.emailId) ?? selected)
-    : null;
+  const selectedEmail = useMemo(() => {
+    if (!selectedId) return null;
+    return getEmailDetail(selectedId) ?? rows.find((r) => r.emailId === selectedId) ?? null;
+  }, [selectedId, getEmailDetail, rows]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    setDetailTab("insights");
+    loadEmailDetail(selectedId);
+  }, [selectedId, loadEmailDetail]);
 
   function handleSelect(email: EmailSummary) {
-    if (selected?.emailId === email.emailId) { setSelected(null); return; }
-    setSelected(email);
-    setDetailTab("insights");
-    onLoadDetail(email.emailId);
+    router.push(selectedId === email.emailId ? "/hiring" : `/hiring/${encodeURIComponent(email.emailId)}`);
   }
 
   async function evaluate(email: EmailSummary) {
     if (!hasCriteria) return;
-    setEvaluations(prev => new Map(prev).set(email.emailId, { loading: true, result: null, error: null }));
+    setEvaluations((prev) => new Map(prev).set(email.emailId, { loading: true, result: null, error: null }));
     try {
       const res = await fetch("/api/hiring/evaluate", {
         method: "POST",
@@ -156,9 +194,9 @@ export default function HiringView({ summaries, isLoading, onFetch, onLoadDetail
       });
       const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
       if (!res.ok || !data.success) throw new Error(data.error ?? "Evaluation failed");
-      setEvaluations(prev => new Map(prev).set(email.emailId, { loading: false, result: data.evaluation, error: null }));
+      setEvaluations((prev) => new Map(prev).set(email.emailId, { loading: false, result: data.evaluation, error: null }));
     } catch (err) {
-      setEvaluations(prev => new Map(prev).set(email.emailId, {
+      setEvaluations((prev) => new Map(prev).set(email.emailId, {
         loading: false, result: null,
         error: err instanceof Error ? err.message : "Failed",
       }));
@@ -166,96 +204,199 @@ export default function HiringView({ summaries, isLoading, onFetch, onLoadDetail
   }
 
   async function evaluateAll() {
-    if (!hasCriteria || summaries.length === 0) return;
+    if (!hasCriteria || rows.length === 0) return;
     setIsEvaluatingAll(true);
     // Run sequentially to avoid hammering the API
-    for (const email of summaries) {
+    for (const email of rows) {
       const existing = evaluations.get(email.emailId);
-      if (existing?.result) continue; // skip already evaluated
+      if (existing?.result) continue;
       await evaluate(email);
     }
     setIsEvaluatingAll(false);
+  }
+
+  async function bulkEvaluate(ids: string[]) {
+    if (!hasCriteria) return;
+    for (const id of ids) {
+      const email = rows.find((r) => r.emailId === id);
+      if (!email) continue;
+      const existing = evaluations.get(id);
+      if (existing?.result) continue;
+      await evaluate(email);
+    }
+  }
+
+  async function bulkMarkStatus(ids: string[], newStatus: EmailStatus) {
+    setRows((prev) => prev.map((r) => (ids.includes(r.emailId) ? { ...r, status: newStatus } : r)));
+    await Promise.all(ids.map((id) => patchEmail(id, { status: newStatus })));
+    fetchPage();
+  }
+
+  function handleTagsChange(emailId: string, tags: string[]) {
+    setRows((prev) => prev.map((r) => (r.emailId === emailId ? { ...r, tags } : r)));
+    patchEmail(emailId, { tags });
+  }
+
+  function handleStageChange(emailId: string, stage: Stage) {
+    setRows((prev) => prev.map((r) => (r.emailId === emailId ? { ...r, stage } : r)));
+    patchEmail(emailId, { stage });
+  }
+
+  async function bulkMoveStage(ids: string[], stage: Stage) {
+    setRows((prev) => prev.map((r) => (ids.includes(r.emailId) ? { ...r, stage } : r)));
+    await Promise.all(ids.map((id) => patchEmail(id, { stage })));
+    fetchPage();
+  }
+
+  function clearFilters() {
+    setSearchInput("");
+    setCandidateFilter("");
+  }
+
+  // Gmail-style single-line candidate row: avatar, name, "subject — snippet",
+  // match score (once evaluated) or a hover-reveal Evaluate action, date.
+  function renderCandidateRow(c: Candidate) {
+    const sender = parseSender(c.email.from);
+    const evalState = evaluations.get(c.email.emailId) ?? null;
+    const isEvaluating = evalState?.loading ?? false;
+    return (
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${avatarGradient(c.email.from)} flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0`}>
+          {sender.initials}
+        </div>
+        <span className="w-[160px] flex-shrink-0 truncate text-xs font-medium text-gray-900">{sender.name}</span>
+        <span className="flex-1 min-w-0 truncate text-xs">
+          <span className="text-gray-700 font-medium">{c.email.subject || "(No Subject)"}</span>
+          <span className="text-gray-400"> — {c.email.summary}</span>
+        </span>
+        {c.email.tags.length > 0 && (
+          <span className="flex items-center gap-1 flex-shrink-0">
+            {c.email.tags.slice(0, 2).map((tag) => (
+              <span key={tag} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600 whitespace-nowrap">{tag}</span>
+            ))}
+            {c.email.tags.length > 2 && <span className="text-[10px] text-gray-400">+{c.email.tags.length - 2}</span>}
+          </span>
+        )}
+        {hasCriteria && !c.eval && (c.mand > 0 || c.opt > 0) && (
+          <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600 whitespace-nowrap">
+            {c.mand}/{criteria.mandatory.length} req
+          </span>
+        )}
+        {c.eval && (
+          <span className={`flex-shrink-0 text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap
+            ${c.eval.matchScore >= 70 ? "bg-emerald-100 text-emerald-700" : c.eval.matchScore >= 40 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600"}`}>
+            {c.eval.matchScore}%
+          </span>
+        )}
+        {evalState?.error && <span className="flex-shrink-0 text-[10px] text-red-400 whitespace-nowrap">Error</span>}
+        {(c.email.attachments?.length ?? 0) > 0 && (
+          <svg className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Has attachment">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+          </svg>
+        )}
+        {isEvaluating ? (
+          <div className="flex-shrink-0 w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        ) : hasCriteria && !c.eval ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); evaluate(c.email); }}
+            className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-[10px] font-semibold px-2 py-1 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 ring-1 ring-violet-200 transition-opacity whitespace-nowrap"
+          >
+            Evaluate
+          </button>
+        ) : null}
+        <span className="w-14 flex-shrink-0 text-right text-xs text-gray-400 whitespace-nowrap">{formatRelative(c.email.date)}</span>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex-shrink-0 flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex-shrink-0 flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-base font-bold text-gray-900">Hiring</h1>
+          <h1 className="text-base font-bold text-gray-900">
+            Hiring
+            {activeStage && <span className="text-violet-600"> · {activeStage}</span>}
+          </h1>
           <p className="text-xs text-gray-400 mt-0.5">
-            {summaries.length} candidate{summaries.length !== 1 ? "s" : ""}
+            {total} candidate{total !== 1 ? "s" : ""}
             {hasCriteria ? ` · ${criteria.position}` : ""}
+            {activeStage && (
+              <button onClick={() => router.push("/hiring")} className="ml-2 text-violet-600 hover:text-violet-700 font-medium">
+                Clear stage filter ×
+              </button>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {hasCriteria && summaries.length > 0 && (
+          {hasCriteria && rows.length > 0 && (
             <button
               onClick={evaluateAll}
               disabled={isEvaluatingAll || isLoading}
-              title="Run AI evaluation for all candidates against the job criteria"
+              title="Run AI evaluation for all candidates on this page against the job criteria"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-violet-100 hover:bg-violet-200 disabled:opacity-50 text-violet-700 text-sm font-medium transition-colors"
             >
               {isEvaluatingAll
                 ? <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
                 : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               }
-              <span className="hidden sm:inline">{isEvaluatingAll ? "Evaluating…" : "Evaluate All"}</span>
+              <span className="hidden sm:inline">{isEvaluatingAll ? "Evaluating…" : "Evaluate Page"}</span>
             </button>
           )}
-          <button onClick={onFetch} disabled={isLoading}
+          <button onClick={syncEmails} disabled={isSyncing}
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
-            {isLoading
+            {isSyncing
               ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             }
-            <span className="hidden sm:inline">{isLoading ? "Syncing…" : "Refresh"}</span>
+            <span className="hidden sm:inline">{isSyncing ? "Syncing…" : "Refresh"}</span>
           </button>
         </div>
       </div>
 
       {/* ── Candidate search & filters ──────────────────────────────────── */}
       <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50/50 px-4 py-2.5 flex flex-wrap items-center gap-2">
-        {/* Search */}
         <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
-          </svg>
+          {searchInput.trim() !== "" && (searchInput !== debouncedSearch || isLoading) ? (
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-violet-400 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          ) : (
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
+            </svg>
+          )}
           <input
-            value={search} onChange={e => setSearch(e.target.value)}
+            value={searchInput} onChange={e => setSearchInput(e.target.value)}
             placeholder="Search candidates…"
             className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors"
           />
         </div>
 
-        {/* Evaluated filter */}
-        <select
-          value={filterEval}
-          onChange={e => setFilterEval(e.target.value as "" | "evaluated" | "unevaluated")}
-          className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-colors ${filterEval ? "border-violet-400 bg-violet-50 text-violet-700 font-medium" : "border-gray-200 bg-white text-gray-600"}`}
-        >
-          <option value="">All Candidates</option>
-          <option value="evaluated">Evaluated only</option>
-          <option value="unevaluated">Not yet evaluated</option>
-        </select>
+        {searchInput.trim() !== "" && (searchInput !== debouncedSearch || isLoading) && (
+          <span className="text-xs text-violet-500 font-medium animate-pulse">Searching…</span>
+        )}
 
-        {/* Match score filter — only useful after evaluating */}
-        <select
-          value={filterMatch}
-          onChange={e => setFilterMatch(e.target.value as "" | "high" | "medium" | "low")}
-          disabled={!summaries.some(s => evaluations.get(s.emailId)?.result)}
-          className={`text-sm rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${filterMatch ? "border-violet-400 bg-violet-50 text-violet-700 font-medium" : "border-gray-200 bg-white text-gray-600"}`}
-        >
-          <option value="">Any Match Score</option>
-          <option value="high">High match (≥70%)</option>
-          <option value="medium">Medium match (40–69%)</option>
-          <option value="low">Low match (&lt;40%)</option>
-        </select>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {FILTER_PILLS.filter(p => p.value === "" || p.value === "unevaluated" || hasEvaluations).map(p => (
+            <button
+              key={p.value || "all"}
+              onClick={() => setCandidateFilter(p.value)}
+              className={`text-xs font-medium px-3 py-2 rounded-full border whitespace-nowrap transition-colors
+                ${candidateFilter === p.value
+                  ? "bg-violet-600 border-violet-600 text-white"
+                  : "bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-700"}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
 
         {hasFilters && (
           <button
-            onClick={() => { setSearch(""); setFilterEval(""); setFilterMatch(""); }}
+            onClick={clearFilters}
             className="flex items-center gap-1 text-xs text-violet-600 font-medium hover:text-violet-800 px-2.5 py-2 rounded-lg border border-violet-200 bg-violet-50 transition-colors"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -264,220 +405,66 @@ export default function HiringView({ summaries, isLoading, onFetch, onLoadDetail
         )}
 
         <span className="ml-auto text-xs text-gray-400 hidden sm:block">
-          {visibleCandidates.length}{hasFilters ? ` of ${summaries.length}` : ""} candidate{summaries.length !== 1 ? "s" : ""}
+          {visibleCandidates.length}{hasFilters ? ` of ${rows.length} on page` : ""} candidate{rows.length !== 1 ? "s" : ""}
         </span>
       </div>
 
-      {/* ── Job Criteria panel ───────────────────────────────────────────── */}
-      <div className="flex-shrink-0 border-b border-gray-200 bg-white">
-        <button type="button" onClick={() => setCriteriaOpen(o => !o)}
-          className="w-full flex items-center justify-between px-6 py-3 hover:bg-gray-50 transition-colors">
-          <div className="flex items-center gap-2.5">
-            <div className="w-6 h-6 rounded-md bg-violet-100 flex items-center justify-center flex-shrink-0">
-              <svg className="w-3.5 h-3.5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            </div>
-            <span className="text-sm font-semibold text-gray-700">
-              Job Criteria
-              {hasCriteria && <span className="ml-2 text-xs font-normal text-gray-400">{criteria.position} · {criteria.mandatory.length} required</span>}
-              {!hasCriteria && <span className="ml-2 text-xs font-normal text-gray-400">Set requirements to enable AI evaluation</span>}
-            </span>
-          </div>
-          <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${criteriaOpen ? "rotate-180" : ""}`}
-            fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
 
-        {criteriaOpen && (
-          <div className="px-6 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-gray-100 pt-4">
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Position</label>
-              <input value={criteria.position} onChange={e => setCriteria(c => ({ ...c, position: e.target.value }))}
-                placeholder="e.g. Senior React Developer"
-                className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 bg-white" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
-                Must Have <span className="text-gray-400 font-normal normal-case">(Enter to add)</span>
-              </label>
-              <TagInput value={criteria.mandatory} onChange={v => setCriteria(c => ({ ...c, mandatory: v }))} placeholder="e.g. React, 5+ yrs" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Nice to Have</label>
-              <TagInput value={criteria.optional} onChange={v => setCriteria(c => ({ ...c, optional: v }))} placeholder="e.g. TypeScript" />
-            </div>
-          </div>
-        )}
-      </div>
+      {/* ── Split view: narrower list column when a candidate is open ──────── */}
+      <div className="flex-1 flex overflow-hidden">
+        <div className={`flex flex-col overflow-hidden ${selectedEmail ? "w-[420px] flex-shrink-0 border-r border-gray-200" : "flex-1"}`}>
+          <DataTable
+            variant="list"
+            renderRow={renderCandidateRow}
+            rows={visibleCandidates}
+            rowKey={(c) => c.email.emailId}
+            onRowClick={(c) => handleSelect(c.email)}
+            isRowSelected={(c) => selectedId === c.email.emailId}
+            selectable
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            bulkActions={[
+              ...(hasCriteria ? [{ label: "Evaluate Selected", onRun: bulkEvaluate }] : []),
+              { label: "Shortlist", onRun: (ids: string[]) => bulkMoveStage(ids, "Shortlisted") },
+              { label: "Reject", onRun: (ids: string[]) => bulkMoveStage(ids, "Rejected"), variant: "danger" as const },
+              { label: "Mark as Open", onRun: (ids: string[]) => bulkMarkStatus(ids, "Open") },
+              { label: "Mark as Closed", onRun: (ids: string[]) => bulkMarkStatus(ids, "Closed") },
+            ]}
+            pagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
+            isLoading={isLoading || isSyncing}
+            emptyState={
+              <div className="flex flex-col items-center justify-center gap-3 text-gray-400">
+                <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <p className="text-sm">{hasFilters ? "No candidates match the current filters" : "No hiring emails found"}</p>
+                {hasFilters ? (
+                  <button onClick={clearFilters} className="text-sm font-medium text-violet-600 hover:text-violet-700">Clear filters →</button>
+                ) : (
+                  <button onClick={syncEmails} className="text-sm font-medium text-violet-600 hover:text-violet-700">Sync inbox →</button>
+                )}
+              </div>
+            }
+          />
+        </div>
 
-      {/* ── Table ───────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto">
-        {summaries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
-            <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <p className="text-sm">No hiring emails found</p>
-            <button onClick={onFetch} className="text-sm font-medium text-violet-600 hover:text-violet-700">Sync inbox →</button>
-          </div>
-        ) : visibleCandidates.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
-            <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
-            </svg>
-            <p className="text-sm">No candidates match the current filters</p>
-            <button onClick={() => { setSearch(""); setFilterEval(""); setFilterMatch(""); }} className="text-sm font-medium text-violet-600 hover:text-violet-700">Clear filters →</button>
-          </div>
-        ) : (
-          <table className="w-full text-sm border-collapse min-w-[860px]">
-            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Candidate</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Subject</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">AI Summary</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Match</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Result</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Attachments</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Evaluate</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {visibleCandidates.map(({ email, mand, opt, eval: evalResult }) => {
-                const sender = parseSender(email.from);
-                const isSelected = selectedEmail?.emailId === email.emailId;
-                const evalState = evaluations.get(email.emailId) ?? null;
-                const isEvaluating = evalState?.loading ?? false;
-                const hasKwMatch = hasCriteria && !evalResult && (mand > 0 || opt > 0);
-
-                return (
-                  <tr
-                    key={email.emailId}
-                    onClick={() => handleSelect(email)}
-                    className={`cursor-pointer transition-colors
-                      ${isSelected ? "bg-violet-50 border-l-2 border-l-violet-500" : "bg-white hover:bg-gray-50"}`}
-                  >
-                    {/* Candidate */}
-                    <td className="px-4 py-3 min-w-[160px] max-w-[200px]">
-                      <div className="flex items-center gap-2.5">
-                        <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${avatarGradient(email.from)} flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0`}>
-                          {sender.initials}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-gray-900 truncate">{sender.name}</p>
-                          <p className="text-[10px] text-gray-400 truncate">{sender.email}</p>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Date */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs text-gray-500">{formatRelative(email.date)}</span>
-                    </td>
-
-                    {/* Subject */}
-                    <td className="px-4 py-3 max-w-[200px]">
-                      <p className="text-xs text-gray-700 truncate font-medium">{email.subject || "(No Subject)"}</p>
-                    </td>
-
-                    {/* AI Summary */}
-                    <td className="px-4 py-3 max-w-[340px]">
-                      <p className="text-[11px] text-gray-600 leading-relaxed">{email.summary}</p>
-                      {hasKwMatch && (
-                        <span className="inline-block mt-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600">
-                          {mand}/{criteria.mandatory.length} req{opt > 0 ? ` +${opt} opt` : ""}
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Match score */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {evalResult ? (
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full
-                          ${evalResult.matchScore >= 70 ? "bg-emerald-100 text-emerald-700"
-                            : evalResult.matchScore >= 40 ? "bg-amber-100 text-amber-700"
-                            : "bg-red-100 text-red-600"}`}>
-                          {evalResult.matchScore}%
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-gray-300">—</span>
-                      )}
-                    </td>
-
-                    {/* Recommendation */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {evalResult ? (
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset
-                          ${evalResult.recommendation === "Yes"
-                            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                            : "bg-red-50 text-red-600 ring-red-200"}`}>
-                          {evalResult.recommendation === "Yes" ? "✓ Yes" : "✗ No"}
-                        </span>
-                      ) : evalState?.error ? (
-                        <span className="text-[10px] text-red-400">Error</span>
-                      ) : (
-                        <span className="text-[10px] text-gray-300">—</span>
-                      )}
-                    </td>
-
-                    {/* Attachments */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {(email.attachments?.length ?? 0) > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">
-                          <svg className="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                          {email.attachments!.length}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-gray-300">—</span>
-                      )}
-                    </td>
-
-                    {/* Evaluate button */}
-                    <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                      {isEvaluating ? (
-                        <div className="flex items-center gap-1 text-[10px] text-violet-500">
-                          <div className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                          Evaluating…
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => evaluate(email)}
-                          disabled={!hasCriteria}
-                          title={hasCriteria ? "Evaluate against job criteria" : "Set position & requirements first"}
-                          className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors ring-1 ring-violet-200"
-                        >
-                          {evalResult ? "Re-evaluate" : "Evaluate"}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* ── Slide-over detail panel ──────────────────────────────────────── */}
-      {selectedEmail && (
-        <>
-          <div className="fixed inset-0 bg-black/20 z-30 backdrop-blur-[1px]" onClick={() => setSelected(null)} />
+        {/* ── Reading pane (Gmail-style split, not an overlay) ─────────── */}
+        {selectedEmail && (
           <DetailPanel
             email={selectedEmail}
             evalState={evaluations.get(selectedEmail.emailId) ?? null}
             detailTab={detailTab}
             onTabChange={setDetailTab}
-            onClose={() => setSelected(null)}
+            onClose={() => router.push("/hiring")}
             onEvaluate={() => evaluate(selectedEmail)}
             hasCriteria={hasCriteria}
             isLoadingDetail={loadingDetailId === selectedEmail.emailId}
+            onTagsChange={(tags) => handleTagsChange(selectedEmail.emailId, tags)}
+            availableTags={availableTags}
+            onStageChange={(stage) => handleStageChange(selectedEmail.emailId, stage)}
           />
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -493,16 +480,19 @@ interface DetailPanelProps {
   onEvaluate: () => void;
   hasCriteria: boolean;
   isLoadingDetail: boolean;
+  onTagsChange: (tags: string[]) => void;
+  availableTags: string[];
+  onStageChange: (stage: Stage) => void;
 }
 
-function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEvaluate, hasCriteria, isLoadingDetail }: DetailPanelProps) {
+function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEvaluate, hasCriteria, isLoadingDetail, onTagsChange, availableTags, onStageChange }: DetailPanelProps) {
   const sender = parseSender(email.from);
   const evaluated = evalState?.result ?? null;
   const candidateName = (evaluated?.candidateName && evaluated.candidateName !== "Unknown Candidate")
     ? evaluated.candidateName : sender.name;
 
   return (
-    <div className="fixed top-0 right-0 h-full w-full max-w-xl bg-white shadow-2xl z-40 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden bg-white">
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 flex-shrink-0">
@@ -512,6 +502,13 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
           </svg>
         </button>
         <div className="flex-1" />
+        <select
+          value={email.stage}
+          onChange={(e) => onStageChange(e.target.value as Stage)}
+          className="text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 text-gray-600"
+        >
+          {STAGES.map((s) => <option key={s}>{s}</option>)}
+        </select>
         {!evalState ? (
           <button onClick={onEvaluate} disabled={!hasCriteria}
             title={hasCriteria ? "Evaluate against job criteria" : "Set job criteria first"}
@@ -571,6 +568,10 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
                 </span>
               )}
             </div>
+            <div className="mt-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Tags</p>
+              <TagInput value={email.tags} onChange={onTagsChange} placeholder="Add a tag…" suggestions={availableTags} />
+            </div>
           </div>
         </div>
 
@@ -610,12 +611,15 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
               {(email.htmlBody || email.body) ? (
                 email.htmlBody ? (
                   <div className="rounded-xl border border-gray-200 overflow-hidden">
-                    <iframe srcDoc={email.htmlBody} sandbox=""
+                    <iframe srcDoc={email.htmlBody} sandbox="allow-popups allow-popups-to-escape-sandbox"
                       className="w-full bg-white" style={{ height: "480px", border: "none" }} title="Email content" />
                   </div>
                 ) : (
                   <div className="bg-gray-50 rounded-xl p-5 border border-gray-200 max-h-96 overflow-y-auto">
-                    <pre className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-sans break-words">{email.body}</pre>
+                    <LinkifiedText
+                      text={email.body ?? ""}
+                      className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap font-sans break-words"
+                    />
                   </div>
                 )
               ) : isLoadingDetail ? (

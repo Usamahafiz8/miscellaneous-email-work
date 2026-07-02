@@ -65,6 +65,7 @@ Return exactly this JSON array with one object per email in the same order:
     "priority": "Critical|High|Medium|Low",
     "actionRequired": "Yes|No",
     "purpose": "short label e.g. Job Application, Meeting Request, Invoice, Newsletter",${attachmentSummaryField}
+    "candidateProfile": {"name": "...", "role": "...", "experience": "...", "skills": ["..."], "education": "...", "achievements": "..."} or null,
   }
 ]
 
@@ -72,7 +73,8 @@ Category rules: Hiring=resumes/applications, Client Support=customer issues, Sal
 Priority rules: Critical=server down/urgent legal, High=client awaiting reply/urgent meetings, Medium=standard correspondence, Low=newsletters/notifications
 actionRequired: Yes=needs human response/action, No=informational only
 keyPoints rules: Extract the most important, specific facts. For hiring emails: years of experience, skills, role applied for, education, notable achievements, availability, expected salary. For other emails: action items, deadlines, amounts, decisions, people mentioned. Each point must be a complete, self-contained fact (not vague like "good candidate"). Aim for 5 points minimum.
-attachmentSummary: Only for emails whose block includes an "Attachment N content:" line. Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content of THAT attachment text — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual, and base it strictly on the attachment text, never on the email body or subject. Set to null if the email's block says "Attachments: none" — do not guess or fabricate.`;
+attachmentSummary: Only for emails whose block includes an "Attachment N content:" line. Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content of THAT attachment text — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual, and base it strictly on the attachment text, never on the email body or subject. Set to null if the email's block says "Attachments: none" — do not guess or fabricate.
+candidateProfile: ONLY for emails you categorized as Hiring. Extract from whichever source has real candidate data — the attachment text if present, otherwise the email body itself (a body-only job application still counts). Fill only fields with real, specific data (real name, real skill names, real years) — omit/null a field rather than guess. Set the entire object to null for non-Hiring emails. Never fabricate from the subject line alone.`;
 }
 
 function safeParseJSON(text: string): Record<string, unknown>[] {
@@ -116,6 +118,9 @@ async function summarizeChunk(
   return parsed.map((item) => {
     const emailId = String(item.emailId ?? "");
     const original = emailMap.get(emailId);
+    const profile = item.candidateProfile && typeof item.candidateProfile === "object"
+      ? item.candidateProfile as Record<string, unknown>
+      : null;
     return {
       emailId,
       from: original?.from ?? "",
@@ -135,6 +140,14 @@ async function summarizeChunk(
         ? String(item.attachmentSummary)
         : undefined,
       status: "New",
+      stage: "New",
+      tags: [],
+      candidateName: profile?.name ? String(profile.name) : undefined,
+      candidateRole: profile?.role ? String(profile.role) : undefined,
+      candidateExperience: profile?.experience ? String(profile.experience) : undefined,
+      candidateSkills: Array.isArray(profile?.skills) ? (profile!.skills as string[]).map(String) : [],
+      candidateEducation: profile?.education ? String(profile.education) : undefined,
+      candidateAchievements: profile?.achievements ? String(profile.achievements) : undefined,
       fetchedAt: new Date().toISOString(),
     };
   });
@@ -198,6 +211,57 @@ Rules:
   });
 
   return message.choices[0]?.message?.content?.trim() ?? null;
+}
+
+export interface CandidateProfile {
+  name?: string;
+  role?: string;
+  experience?: string;
+  skills: string[];
+  education?: string;
+  achievements?: string;
+}
+
+// One-off backfill path (see POST /api/hiring/backfill-profile): extracts the same
+// structured fields as buildBatchPrompt's candidateProfile, but for a hiring email
+// that has no PDF attachment at all — body text is the only source available.
+export async function extractCandidateProfileFromBody(
+  subject: string,
+  from: string,
+  body: string
+): Promise<CandidateProfile | null> {
+  const prompt = `This is a job application email with no resume attachment — the candidate's info is only in the email body below. Extract whatever real candidate details are present.
+
+Email Subject: ${subject}
+From: ${from}
+Body: ${body.slice(0, 3000)}
+
+Respond ONLY with valid JSON, omitting any field with no real data:
+{"name": "...", "role": "...", "experience": "...", "skills": ["..."], "education": "...", "achievements": "..."}
+If there is no real candidate data in this email at all, respond with: null`;
+
+  const message = await getClient().chat.completions.create({
+    model: "meta-llama/llama-3.3-70b-instruct",
+    max_tokens: 400,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const text = message.choices[0]?.message?.content?.trim();
+  if (!text || text === "null") return null;
+  try {
+    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    return {
+      name: parsed.name ? String(parsed.name) : undefined,
+      role: parsed.role ? String(parsed.role) : undefined,
+      experience: parsed.experience ? String(parsed.experience) : undefined,
+      skills: Array.isArray(parsed.skills) ? (parsed.skills as string[]).map(String) : [],
+      education: parsed.education ? String(parsed.education) : undefined,
+      achievements: parsed.achievements ? String(parsed.achievements) : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function evaluateCandidate(

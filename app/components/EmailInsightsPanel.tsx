@@ -1,6 +1,7 @@
 "use client";
 
 import type { EmailSummary } from "@/lib/types";
+import { parseSections } from "@/lib/parseSections";
 
 const POINT_BADGE = [
   "bg-violet-100 text-violet-700", "bg-blue-100 text-blue-700",
@@ -29,18 +30,6 @@ const SECTION_CONFIG: Record<string, { icon: string; color: string }> = {
   "Key Achievements":    { icon: "🏆", color: "text-orange-700" },
   "Other Details":       { icon: "📝", color: "text-gray-600" },
 };
-
-interface ParsedSection { label: string; value: string }
-
-function parseSections(text: string): ParsedSection[] | null {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const sections: ParsedSection[] = [];
-  for (const line of lines) {
-    const match = line.match(/^§\s*(.+?):\s*(.+)$/);
-    if (match) sections.push({ label: match[1].trim(), value: match[2].trim() });
-  }
-  return sections.length >= 2 ? sections : null;
-}
 
 function WorkHistoryValue({ value }: { value: string }) {
   const entries = value.split(/,\s*(?=[A-Z])/);
