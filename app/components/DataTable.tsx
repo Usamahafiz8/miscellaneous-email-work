@@ -121,6 +121,12 @@ export default function DataTable<T>({
         </div>
       )}
 
+      {isLoading && (
+        <div className="h-0.5 w-full bg-indigo-100 overflow-hidden flex-shrink-0">
+          <div className="h-full w-1/3 bg-indigo-500 animate-loading-bar" />
+        </div>
+      )}
+
       <div className={`${fillHeight ? "flex-1 overflow-auto" : ""} transition-opacity ${isLoading ? "opacity-50 pointer-events-none" : ""}`}>
         {rows.length === 0 ? (
           <div className="flex items-center justify-center py-16">
@@ -159,7 +165,7 @@ export default function DataTable<T>({
             })}
           </div>
         ) : (
-          <table className="w-full text-sm border-collapse">
+          <table className="w-full table-fixed text-sm border-collapse">
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 {selectable && (

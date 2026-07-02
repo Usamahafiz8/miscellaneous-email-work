@@ -125,6 +125,8 @@ export interface EmailListQuery {
   actionRequired?: ActionRequired[];
   stage?: Stage[];
   tags?: string[];
+  dateFrom?: string;
+  dateTo?: string;
   sortBy?: SortField;
   sortOrder?: SortOrder;
 }

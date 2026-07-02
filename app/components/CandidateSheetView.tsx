@@ -163,7 +163,7 @@ export default function CandidateSheetView() {
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search candidates…"
+              placeholder="Search candidates… (try from: subject:)"
               className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors"
             />
           </div>

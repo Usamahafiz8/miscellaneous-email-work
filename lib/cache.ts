@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import type { EmailSummary, EmailAttachment, EmailListQuery, EmailListResult } from "./types";
+import { parseSearchQuery } from "./searchQuery";
 
 function toEmailSummary(row: {
   emailId: string; from: string; subject: string; date: string;
@@ -72,16 +73,28 @@ const LIST_SELECT = {
 } as const;
 
 export async function getCachedSummaries(query: EmailListQuery): Promise<EmailListResult> {
-  const { page, pageSize, search, category, priority, status, actionRequired, stage, tags, sortBy = "date", sortOrder = "desc" } = query;
+  const { page, pageSize, search, category, priority, status, actionRequired, stage, tags, dateFrom, dateTo, sortBy = "date", sortOrder = "desc" } = query;
 
   const where: Prisma.EmailSummaryWhereInput = {};
   if (search?.trim()) {
-    const q = search.trim();
-    where.OR = [
-      { subject: { contains: q, mode: "insensitive" } },
-      { from: { contains: q, mode: "insensitive" } },
-      { summary: { contains: q, mode: "insensitive" } },
-    ];
+    // Supports Gmail-style `from:`/`subject:` operators alongside free text —
+    // e.g. `from:hr@company.com subject:developer` narrows both fields, while
+    // any leftover free text still applies the original 3-field OR search.
+    const parsed = parseSearchQuery(search.trim());
+    const clauses: Prisma.EmailSummaryWhereInput[] = [];
+    if (parsed.from) clauses.push({ from: { contains: parsed.from, mode: "insensitive" } });
+    if (parsed.subject) clauses.push({ subject: { contains: parsed.subject, mode: "insensitive" } });
+    if (parsed.free) {
+      clauses.push({
+        OR: [
+          { subject: { contains: parsed.free, mode: "insensitive" } },
+          { from: { contains: parsed.free, mode: "insensitive" } },
+          { summary: { contains: parsed.free, mode: "insensitive" } },
+        ],
+      });
+    }
+    if (clauses.length === 1) Object.assign(where, clauses[0]);
+    else if (clauses.length > 1) where.AND = clauses;
   }
   if (category?.length) where.category = { in: category };
   if (priority?.length) where.priority = { in: priority };
@@ -89,6 +102,15 @@ export async function getCachedSummaries(query: EmailListQuery): Promise<EmailLi
   if (actionRequired?.length) where.actionRequired = { in: actionRequired };
   if (stage?.length) where.stage = { in: stage };
   if (tags?.length) where.tags = { hasSome: tags };
+  if (dateFrom || dateTo) {
+    // `date` is a String column (always populated via .toISOString() in lib/imap.ts),
+    // so lexical gte/lte sorts correctly. A bare dateTo would exclude same-day
+    // timestamps (it sorts before them), hence the end-of-day suffix.
+    where.date = {
+      ...(dateFrom && { gte: dateFrom }),
+      ...(dateTo && { lte: `${dateTo}T23:59:59.999Z` }),
+    };
+  }
 
   const orderBy: Prisma.EmailSummaryOrderByWithRelationInput = { [sortBy]: sortOrder };
 

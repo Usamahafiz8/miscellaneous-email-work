@@ -20,6 +20,11 @@ export function parseEmailListQuery(searchParams: URLSearchParams): EmailListQue
   const stage = searchParams.getAll("stage").filter((s): s is Stage => (STAGES as string[]).includes(s));
   const tags = Array.from(new Set(searchParams.getAll("tag").map((t) => t.trim()).filter(Boolean))).slice(0, MAX_TAGS_FILTER);
 
+  const dateFromRaw = searchParams.get("dateFrom");
+  const dateFrom = dateFromRaw && !isNaN(Date.parse(dateFromRaw)) ? dateFromRaw : undefined;
+  const dateToRaw = searchParams.get("dateTo");
+  const dateTo = dateToRaw && !isNaN(Date.parse(dateToRaw)) ? dateToRaw : undefined;
+
   const sortByRaw = searchParams.get("sortBy");
   const sortBy = VALID_SORT_FIELDS.includes(sortByRaw as SortField) ? (sortByRaw as SortField) : undefined;
   const sortOrderRaw = searchParams.get("sortOrder");
@@ -35,6 +40,8 @@ export function parseEmailListQuery(searchParams: URLSearchParams): EmailListQue
     actionRequired: actionRequired.length ? actionRequired : undefined,
     stage: stage.length ? stage : undefined,
     tags: tags.length ? tags : undefined,
+    dateFrom,
+    dateTo,
     sortBy,
     sortOrder,
   };

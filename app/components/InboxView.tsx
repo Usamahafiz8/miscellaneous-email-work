@@ -6,8 +6,10 @@ import type { EmailSummary, EmailStatus, Priority } from "@/lib/types";
 import { STATUSES, CATEGORIES, PRIORITIES } from "@/lib/types";
 import { formatRelative, formatFull, parseSender, avatarColor } from "@/lib/utils";
 import { useDashboard } from "./DashboardProvider";
-import DataTable from "./DataTable";
+import DataTable, { type ColumnDef, type DataTableSort } from "./DataTable";
 import FilterBar from "./FilterBar";
+import DateRangeFilter from "./DateRangeFilter";
+import FilterPresetsMenu from "./FilterPresetsMenu";
 import PdfViewer from "./PdfViewer";
 import EmailInsightsPanel from "./EmailInsightsPanel";
 import LinkifiedText from "./LinkifiedText";
@@ -47,6 +49,107 @@ const ACTION_OPTIONS = [
   { value: "No", label: "No Action Needed" },
 ];
 
+// ─── Grid columns: full set for full-width inbox, condensed set for the ────
+// narrow 420px split-view column when an email is open beside the reading pane.
+const FULL_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
+  {
+    key: "date", header: "Date", sortable: true, width: "100px",
+    render: (r) => (
+      <span className={`text-xs whitespace-nowrap ${r.status === "New" ? "text-gray-700 font-medium" : "text-gray-400"}`}>
+        {formatRelative(r.date)}
+      </span>
+    ),
+  },
+  {
+    key: "from", header: "Sender", width: "170px",
+    render: (r) => (
+      <span className={`truncate block text-xs ${r.status === "New" ? "font-semibold text-gray-900" : "text-gray-600"}`}>
+        {parseSender(r.from).name}
+      </span>
+    ),
+  },
+  {
+    key: "subject", header: "Subject",
+    render: (r) => (
+      <span className={`truncate block text-xs ${r.status === "New" ? "font-semibold text-gray-900" : "text-gray-700"}`}>
+        {r.subject || "(No Subject)"}
+      </span>
+    ),
+  },
+  {
+    key: "summary", header: "AI Summary", width: "280px",
+    render: (r) => <span className="truncate block text-xs text-gray-500">{r.summary}</span>,
+  },
+  {
+    key: "category", header: "Category", width: "120px",
+    render: (r) => (
+      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset whitespace-nowrap ${CATEGORY_BADGE[r.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
+        {r.category}
+      </span>
+    ),
+  },
+  {
+    key: "priority", header: "Priority", width: "110px",
+    render: (r) => (
+      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${PRIORITY_BADGE[r.priority]}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[r.priority]}`} />
+        {r.priority}
+      </span>
+    ),
+  },
+  {
+    key: "actionRequired", header: "Action", width: "90px",
+    render: (r) => r.actionRequired === "Yes"
+      ? <span className="text-red-500 text-xs whitespace-nowrap" title="Action required">⚡ Yes</span>
+      : <span className="text-gray-300 text-xs">—</span>,
+  },
+  {
+    key: "status", header: "Status", width: "110px",
+    render: (r) => (
+      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_STYLE[r.status]}`}>
+        {r.status}
+      </span>
+    ),
+  },
+];
+
+const NARROW_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
+  {
+    key: "priority", header: "", width: "24px",
+    render: (r) => <span className={`w-1.5 h-1.5 rounded-full inline-block ${PRIORITY_DOT[r.priority]}`} title={`${r.priority} priority`} />,
+  },
+  {
+    key: "from", header: "Sender", width: "110px",
+    render: (r) => (
+      <span className={`truncate block text-xs ${r.status === "New" ? "font-semibold text-gray-900" : "text-gray-600"}`}>
+        {parseSender(r.from).name}
+      </span>
+    ),
+  },
+  {
+    key: "subject", header: "Subject",
+    render: (r) => (
+      <span className={`truncate block text-xs ${r.status === "New" ? "font-semibold text-gray-900" : "text-gray-700"}`}>
+        {r.subject || "(No Subject)"}
+      </span>
+    ),
+  },
+  {
+    key: "date", header: "Date", width: "50px",
+    render: (r) => <span className="text-xs text-gray-400 whitespace-nowrap">{formatRelative(r.date)}</span>,
+  },
+];
+
+interface InboxFilterBag {
+  search: string;
+  category: string[];
+  priority: string[];
+  status: string[];
+  actionRequired: string[];
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function InboxView() {
@@ -71,8 +174,11 @@ export default function InboxView() {
   const [priority, setPriority] = useState<string[]>([]);
   const [status, setStatus] = useState<string[]>([]);
   const [actionRequired, setActionRequired] = useState<string[]>([]);
+  const [dateFrom, setDateFrom] = useState<string | undefined>(undefined);
+  const [dateTo, setDateTo] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [sort, setSort] = useState<DataTableSort>({ field: "date", order: "desc" });
 
   const [rows, setRows] = useState<EmailSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -91,7 +197,7 @@ export default function InboxView() {
 
   // Any filter/search change resets to page 1 — otherwise you could land on
   // an empty page 4 of a filter that now only has 2 pages of results.
-  useEffect(() => { setPage(1); }, [debouncedSearch, category, priority, status, actionRequired]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, category, priority, status, actionRequired, dateFrom, dateTo, sort]);
 
   const fetchPage = useCallback(async () => {
     setIsLoading(true);
@@ -103,8 +209,10 @@ export default function InboxView() {
     priority.forEach((p) => params.append("priority", p));
     status.forEach((s) => params.append("status", s));
     actionRequired.forEach((a) => params.append("actionRequired", a));
-    params.set("sortBy", "date");
-    params.set("sortOrder", "desc");
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    params.set("sortBy", sort.field);
+    params.set("sortOrder", sort.order);
     try {
       const res = await fetch(`/api/email/process?${params.toString()}`);
       const data = await res.json().catch(() => null);
@@ -115,7 +223,7 @@ export default function InboxView() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, debouncedSearch, category, priority, status, actionRequired]);
+  }, [page, pageSize, debouncedSearch, category, priority, status, actionRequired, dateFrom, dateTo, sort]);
 
   useEffect(() => {
     fetchPage();
@@ -218,47 +326,21 @@ export default function InboxView() {
     setPriority([]);
     setStatus([]);
     setActionRequired([]);
+    setDateFrom(undefined);
+    setDateTo(undefined);
   }
 
-  const hasFilters = !!(debouncedSearch || category.length || priority.length || status.length || actionRequired.length);
+  const hasFilters = !!(debouncedSearch || category.length || priority.length || status.length || actionRequired.length || dateFrom || dateTo);
 
-  // Gmail-style single-line row: priority dot, sender, "subject — snippet" (one
-  // truncating line), attachment/action glyphs, date — metadata that doesn't fit
-  // (category, status, sentiment) lives in the detail pane instead of cluttering the row.
-  function renderInboxRow(email: EmailSummary) {
-    const sender = parseSender(email.from);
-    const isUnread = email.status === "New";
-    return (
-      <div className="flex items-center gap-3 min-w-0">
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PRIORITY_DOT[email.priority]}`} title={`${email.priority} priority`} />
-        <span className={`w-[170px] flex-shrink-0 truncate text-xs ${isUnread ? "font-semibold text-gray-900" : "text-gray-600"}`}>
-          {sender.name}
-        </span>
-        <span className="flex-1 min-w-0 truncate text-xs">
-          <span className={isUnread ? "font-semibold text-gray-900" : "text-gray-700"}>{email.subject || "(No Subject)"}</span>
-          <span className="text-gray-400"> — {email.summary}</span>
-        </span>
-        {email.tags.length > 0 && (
-          <span className="flex items-center gap-1 flex-shrink-0">
-            {email.tags.slice(0, 2).map((tag) => (
-              <span key={tag} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600 whitespace-nowrap">{tag}</span>
-            ))}
-            {email.tags.length > 2 && <span className="text-[10px] text-gray-400">+{email.tags.length - 2}</span>}
-          </span>
-        )}
-        {(email.attachments?.length ?? 0) > 0 && (
-          <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Has attachment">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-          </svg>
-        )}
-        {email.actionRequired === "Yes" && (
-          <span className="text-red-500 flex-shrink-0 text-xs" title="Action required">⚡</span>
-        )}
-        <span className={`w-16 flex-shrink-0 text-right text-xs whitespace-nowrap ${isUnread ? "text-gray-700 font-medium" : "text-gray-400"}`}>
-          {formatRelative(email.date)}
-        </span>
-      </div>
-    );
+  const currentFilterBag: InboxFilterBag = { search: searchInput, category, priority, status, actionRequired, dateFrom, dateTo };
+  function applyFilterPreset(f: InboxFilterBag) {
+    setSearchInput(f.search);
+    setCategory(f.category);
+    setPriority(f.priority);
+    setStatus(f.status);
+    setActionRequired(f.actionRequired);
+    setDateFrom(f.dateFrom);
+    setDateTo(f.dateTo);
   }
 
   return (
@@ -324,7 +406,7 @@ export default function InboxView() {
           <FilterBar
             search={searchInput}
             onSearchChange={setSearchInput}
-            searchPlaceholder="Search emails…"
+            searchPlaceholder="Search emails… (try from: subject:)"
             filters={[
               { key: "category", label: "Category", options: CATEGORIES.map((c) => ({ value: c, label: c })), selected: category, onChange: setCategory },
               { key: "priority", label: "Priority", options: PRIORITIES.map((p) => ({ value: p, label: p })), selected: priority, onChange: setPriority },
@@ -332,17 +414,22 @@ export default function InboxView() {
               { key: "actionRequired", label: "Action", options: ACTION_OPTIONS, selected: actionRequired, onChange: setActionRequired },
             ]}
             onClearAll={clearFilters}
-            isSearching={searchInput.trim() !== "" && (searchInput !== debouncedSearch || isLoading)}
+            extraFilters={<DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onApply={(f, t) => { setDateFrom(f); setDateTo(t); }} />}
+            extraFiltersActive={!!(dateFrom || dateTo)}
+            rightSlot={<FilterPresetsMenu storageKey="filterPresets:inbox" currentFilters={currentFilterBag} onApply={applyFilterPreset} />}
+            isLoading={isLoading || searchInput !== debouncedSearch}
           />
 
           <div className="flex-1 overflow-hidden">
             <DataTable
-              variant="list"
-              renderRow={renderInboxRow}
+              variant="grid"
+              columns={selectedEmail ? NARROW_INBOX_COLUMNS : FULL_INBOX_COLUMNS}
               rows={rows}
               rowKey={(r) => r.emailId}
               onRowClick={handleSelect}
               isRowSelected={(r) => selectedId === r.emailId}
+              sort={sort}
+              onSortChange={setSort}
               selectable
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}

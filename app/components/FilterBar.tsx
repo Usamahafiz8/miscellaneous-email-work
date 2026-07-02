@@ -17,16 +17,25 @@ interface FilterBarProps {
   filters: FilterConfig[];
   onClearAll: () => void;
   rightSlot?: React.ReactNode;
-  isSearching?: boolean;
+  // Non-checkbox filter controls (e.g. a date range picker) that don't fit
+  // FilterConfig's shape — rendered inline alongside the MultiSelectFilter list.
+  extraFilters?: React.ReactNode;
+  // Whether extraFilters currently has an active value — factored into the
+  // Clear button and busyLabel below, since those can't inspect extraFilters' contents.
+  extraFiltersActive?: boolean;
+  // True whenever a request triggered by this bar (search debounce/fetch, a
+  // filter pill change, pagination) hasn't landed yet — not just search.
+  isLoading?: boolean;
 }
 
-export default function FilterBar({ search, onSearchChange, searchPlaceholder = "Search…", filters, onClearAll, rightSlot, isSearching }: FilterBarProps) {
-  const hasActive = !!search.trim() || filters.some((f) => f.selected.length > 0);
+export default function FilterBar({ search, onSearchChange, searchPlaceholder = "Search…", filters, onClearAll, rightSlot, extraFilters, extraFiltersActive, isLoading }: FilterBarProps) {
+  const hasActive = !!search.trim() || filters.some((f) => f.selected.length > 0) || !!extraFiltersActive;
+  const busyLabel = search.trim() ? "Searching…" : (filters.some((f) => f.selected.length > 0) || extraFiltersActive) ? "Filtering…" : "Loading…";
 
   return (
     <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50/50 px-4 py-2.5 flex flex-wrap items-center gap-2">
       <div className="relative flex-1 min-w-[180px] max-w-xs">
-        {isSearching ? (
+        {isLoading ? (
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
@@ -44,11 +53,13 @@ export default function FilterBar({ search, onSearchChange, searchPlaceholder = 
         />
       </div>
 
-      {isSearching && <span className="text-xs text-indigo-500 font-medium animate-pulse">Searching…</span>}
+      {isLoading && <span className="text-xs text-indigo-500 font-medium animate-pulse">{busyLabel}</span>}
 
       {filters.map((f) => (
         <MultiSelectFilter key={f.key} label={f.label} options={f.options} selected={f.selected} onChange={f.onChange} />
       ))}
+
+      {extraFilters}
 
       {hasActive && (
         <button
