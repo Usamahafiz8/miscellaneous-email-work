@@ -16,7 +16,6 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
 
     const hasNoRequirements =
       job.techStack.length === 0 &&
-      job.skills.length === 0 &&
       job.minExperienceYears == null &&
       job.maxExperienceYears == null &&
       !job.requiredEmploymentStatus &&
@@ -46,7 +45,6 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
       minExperienceYears: job.minExperienceYears ?? undefined,
       maxExperienceYears: job.maxExperienceYears ?? undefined,
       techStack: job.techStack,
-      skills: job.skills,
       requiredEmploymentStatus: job.requiredEmploymentStatus ?? undefined,
       requiredNoticePeriod: job.requiredNoticePeriod ?? undefined,
       requiredLocation: job.requiredLocation ?? undefined,

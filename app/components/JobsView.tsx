@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { JobPosting, JobCandidateMatch } from "@/lib/types";
 import { useDashboard } from "./DashboardProvider";
 import DataTable, { type ColumnDef } from "./DataTable";
@@ -15,7 +15,6 @@ interface RequirementsDraft {
   minExperienceYears: string;
   maxExperienceYears: string;
   techStack: string[];
-  skills: string[];
   requiredEmploymentStatus: string;
   requiredNoticePeriod: string;
   requiredLocation: string;
@@ -24,7 +23,7 @@ interface RequirementsDraft {
 }
 
 const EMPTY_DRAFT: RequirementsDraft = {
-  minExperienceYears: "", maxExperienceYears: "", techStack: [], skills: [],
+  minExperienceYears: "", maxExperienceYears: "", techStack: [],
   requiredEmploymentStatus: "", requiredNoticePeriod: "", requiredLocation: "",
   requiredEmploymentType: "", otherCriteria: "",
 };
@@ -34,7 +33,6 @@ function draftFromJob(job: JobPosting): RequirementsDraft {
     minExperienceYears: job.minExperienceYears != null ? String(job.minExperienceYears) : "",
     maxExperienceYears: job.maxExperienceYears != null ? String(job.maxExperienceYears) : "",
     techStack: job.techStack,
-    skills: job.skills,
     requiredEmploymentStatus: job.requiredEmploymentStatus ?? "",
     requiredNoticePeriod: job.requiredNoticePeriod ?? "",
     requiredLocation: job.requiredLocation ?? "",
@@ -49,7 +47,6 @@ function draftFromJob(job: JobPosting): RequirementsDraft {
 function hasAnyCriteria(job: JobPosting): boolean {
   return (
     job.techStack.length > 0 ||
-    job.skills.length > 0 ||
     job.minExperienceYears != null ||
     job.maxExperienceYears != null ||
     !!job.requiredEmploymentStatus ||
@@ -86,12 +83,21 @@ function Spinner({ className = "w-3.5 h-3.5" }: { className?: string }) {
 
 export default function JobsView() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { availableSkills } = useDashboard();
 
   // ── Left pane: job list ──────────────────────────────────────────────
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  // Persisted in the URL (?job=<id>), not local state — otherwise navigating
+  // away (e.g. clicking a matched candidate through to /hiring/[emailId]) and
+  // back, or a page refresh, loses the selection and resets to the empty state.
+  const selectedJobId = searchParams.get("job");
+  const selectJob = useCallback((id: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (id) params.set("job", id); else params.delete("job");
+    router.replace(`/jobs${params.toString() ? `?${params.toString()}` : ""}`);
+  }, [searchParams, router]);
   const [newJobTitle, setNewJobTitle] = useState("");
   const [isCreatingJob, setIsCreatingJob] = useState(false);
 
@@ -127,12 +133,12 @@ export default function JobsView() {
       if (res.ok && data?.success && data.job) {
         setNewJobTitle("");
         setJobs((prev) => [data.job, ...prev]);
-        setSelectedJobId(data.job.id);
+        selectJob(data.job.id);
       }
     } finally {
       setIsCreatingJob(false);
     }
-  }, [newJobTitle]);
+  }, [newJobTitle, selectJob]);
 
   const handleDeleteJob = useCallback(async (id: string) => {
     if (!window.confirm("Delete this job posting? This cannot be undone.")) return;
@@ -140,9 +146,9 @@ export default function JobsView() {
     const data = await res.json().catch(() => null);
     if (res.ok && data?.success) {
       setJobs((prev) => prev.filter((j) => j.id !== id));
-      setSelectedJobId((cur) => (cur === id ? null : cur));
+      if (selectedJobId === id) selectJob(null);
     }
-  }, []);
+  }, [selectedJobId, selectJob]);
 
   // ── Right pane: selected job's JD, requirements, scan, matches ───────
   const [jobDescriptionDraft, setJobDescriptionDraft] = useState("");
@@ -259,7 +265,6 @@ export default function JobsView() {
         minExperienceYears: requirementsDraft.minExperienceYears.trim() === "" ? null : Number(requirementsDraft.minExperienceYears),
         maxExperienceYears: requirementsDraft.maxExperienceYears.trim() === "" ? null : Number(requirementsDraft.maxExperienceYears),
         techStack: requirementsDraft.techStack,
-        skills: requirementsDraft.skills,
         requiredEmploymentStatus: requirementsDraft.requiredEmploymentStatus || null,
         requiredNoticePeriod: requirementsDraft.requiredNoticePeriod.trim() || null,
         requiredLocation: requirementsDraft.requiredLocation.trim() || null,
@@ -399,7 +404,7 @@ export default function JobsView() {
             jobs.map((job) => (
               <div
                 key={job.id}
-                onClick={() => setSelectedJobId(job.id)}
+                onClick={() => selectJob(job.id)}
                 className={`group flex items-center gap-2 px-4 py-2.5 cursor-pointer border-b border-gray-100 transition-colors ${
                   selectedJobId === job.id ? "bg-indigo-50" : "hover:bg-gray-50"
                 }`}
@@ -543,21 +548,12 @@ export default function JobsView() {
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Tech Stack</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Tech Stack & Skills</label>
                       <TagInput
                         value={requirementsDraft.techStack}
                         onChange={(v) => setRequirementsDraft((d) => ({ ...d, techStack: v }))}
-                        placeholder="e.g. Node.js, Next.js, NestJS, React, Python"
+                        placeholder="e.g. Node.js, Next.js, NestJS, React, Python, Leadership, Agile"
                         suggestions={availableSkills}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Skills</label>
-                      <TagInput
-                        value={requirementsDraft.skills}
-                        onChange={(v) => setRequirementsDraft((d) => ({ ...d, skills: v }))}
-                        placeholder="e.g. Leadership, Agile, Communication"
                       />
                     </div>
 

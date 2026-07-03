@@ -79,8 +79,7 @@ export interface CandidateEvaluation {
 export interface ParsedJobRequirements {
   minExperienceYears?: number;
   maxExperienceYears?: number;
-  techStack: string[];
-  skills: string[];
+  techStack: string[]; // combined tech stack & skills, one field
   requiredEmploymentStatus?: string;
   requiredNoticePeriod?: string;
   requiredLocation?: string;
@@ -95,7 +94,6 @@ export interface JobPosting {
   minExperienceYears: number | null;
   maxExperienceYears: number | null;
   techStack: string[];
-  skills: string[];
   requiredEmploymentStatus: string | null;
   requiredNoticePeriod: string | null;
   requiredLocation: string | null;

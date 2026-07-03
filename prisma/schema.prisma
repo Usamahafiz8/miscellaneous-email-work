@@ -69,8 +69,7 @@ model JobPosting {
 
   minExperienceYears       Int?
   maxExperienceYears       Int?
-  techStack                String[] @default([])
-  skills                   String[] @default([])
+  techStack                String[] @default([]) // combined tech stack & skills, one field
   requiredEmploymentStatus String?
   requiredNoticePeriod     String?
   requiredLocation         String?

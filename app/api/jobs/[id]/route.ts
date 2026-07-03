@@ -29,7 +29,6 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       minExperienceYears?: number | null;
       maxExperienceYears?: number | null;
       techStack?: string[];
-      skills?: string[];
       requiredEmploymentStatus?: string | null;
       requiredNoticePeriod?: string | null;
       requiredLocation?: string | null;
@@ -39,7 +38,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     const {
       title, jobDescription, minExperienceYears, maxExperienceYears,
-      techStack, skills, requiredEmploymentStatus, requiredNoticePeriod,
+      techStack, requiredEmploymentStatus, requiredNoticePeriod,
       requiredLocation, requiredEmploymentType, otherCriteria,
     } = body;
 
@@ -49,7 +48,6 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (minExperienceYears !== undefined) data.minExperienceYears = minExperienceYears;
     if (maxExperienceYears !== undefined) data.maxExperienceYears = maxExperienceYears;
     if (techStack !== undefined) data.techStack = techStack;
-    if (skills !== undefined) data.skills = skills;
     if (requiredEmploymentStatus !== undefined) data.requiredEmploymentStatus = requiredEmploymentStatus;
     if (requiredNoticePeriod !== undefined) data.requiredNoticePeriod = requiredNoticePeriod;
     if (requiredLocation !== undefined) data.requiredLocation = requiredLocation;

@@ -29,7 +29,6 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
         minExperienceYears: extracted.minExperienceYears ?? null,
         maxExperienceYears: extracted.maxExperienceYears ?? null,
         techStack: extracted.techStack ?? [],
-        skills: extracted.skills ?? [],
         requiredEmploymentStatus: extracted.requiredEmploymentStatus ?? null,
         requiredNoticePeriod: extracted.requiredNoticePeriod ?? null,
         requiredLocation: extracted.requiredLocation ?? null,

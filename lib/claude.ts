@@ -277,7 +277,7 @@ export async function parseJobDescription(jobDescriptionText: string): Promise<P
 Job Description: ${jobDescriptionText.slice(0, 6000)}
 
 Respond ONLY with valid JSON, omitting any field with no real data:
-{"minExperienceYears": number, "maxExperienceYears": number, "techStack": ["..."], "skills": ["..."], "requiredEmploymentStatus": "...", "requiredNoticePeriod": "...", "requiredLocation": "...", "requiredEmploymentType": "...", "otherCriteria": "any other important hiring criteria not captured above"}
+{"minExperienceYears": number, "maxExperienceYears": number, "techStack": ["required tech stack, tools, and skills, all in one list"], "requiredEmploymentStatus": "...", "requiredNoticePeriod": "...", "requiredLocation": "...", "requiredEmploymentType": "...", "otherCriteria": "any other important hiring criteria not captured above"}
 If there is no real hiring content in this text at all, respond with: null`;
 
   const message = await getClient().chat.completions.create({
@@ -295,7 +295,6 @@ If there is no real hiring content in this text at all, respond with: null`;
       minExperienceYears: typeof parsed.minExperienceYears === "number" ? parsed.minExperienceYears : undefined,
       maxExperienceYears: typeof parsed.maxExperienceYears === "number" ? parsed.maxExperienceYears : undefined,
       techStack: Array.isArray(parsed.techStack) ? (parsed.techStack as string[]).map(String) : [],
-      skills: Array.isArray(parsed.skills) ? (parsed.skills as string[]).map(String) : [],
       requiredEmploymentStatus: parsed.requiredEmploymentStatus ? String(parsed.requiredEmploymentStatus) : undefined,
       requiredNoticePeriod: parsed.requiredNoticePeriod ? String(parsed.requiredNoticePeriod) : undefined,
       requiredLocation: parsed.requiredLocation ? String(parsed.requiredLocation) : undefined,
@@ -335,8 +334,7 @@ export async function matchCandidateToJob(
 
 JOB: ${job.title}
 Required experience: ${job.minExperienceYears ?? "not specified"}${job.maxExperienceYears ? `–${job.maxExperienceYears}` : "+"} years
-Required tech stack: ${job.techStack.join(", ") || "none specified"}
-Required skills: ${job.skills.join(", ") || "none specified"}
+Required tech stack & skills: ${job.techStack.join(", ") || "none specified"}
 Required employment status: ${fmt(job.requiredEmploymentStatus)}
 Required notice period: ${fmt(job.requiredNoticePeriod)}
 Required location: ${fmt(job.requiredLocation)}
