@@ -3,6 +3,7 @@ import { fetchEmails } from "@/lib/imap";
 import { summarizeEmails } from "@/lib/claude";
 import { cacheSummaries, getCachedSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
 import { parseEmailListQuery } from "@/lib/queryParams";
+import { currentAccount, currentImapConfig } from "@/lib/session";
 import type { SummaryLength } from "@/lib/types";
 
 // Allow up to 5 minutes — required for Vercel Pro; on Hobby plan cap is 60s
@@ -15,11 +16,16 @@ const NEW_EMAIL_BATCH = 15;
 // Load emails from DB only — no IMAP, no AI calls. Supports the same
 // filter/sort/page query contract as GET /api/summaries.
 export async function GET(request: NextRequest) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const query = parseEmailListQuery(searchParams);
 
   try {
-    const result = await getCachedSummaries(query);
+    const result = await getCachedSummaries(query, account);
     return NextResponse.json({ success: true, ...result, fromCache: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load from database";
@@ -29,18 +35,10 @@ export async function GET(request: NextRequest) {
 
 // Sync from IMAP — runs AI only for emails not already in DB
 export async function POST(request: NextRequest) {
-  const config = {
-    email: process.env.EMAIL_ADDRESS ?? "",
-    password: process.env.EMAIL_PASSWORD ?? "",
-    host: process.env.IMAP_HOST ?? "imap.gmail.com",
-    port: Number(process.env.IMAP_PORT ?? 993),
-  };
-
-  if (!config.email || !config.password || !config.host) {
-    return NextResponse.json(
-      { success: false, error: "Email credentials not configured in .env.local" },
-      { status: 500 }
-    );
+  const account = currentAccount();
+  const config = currentImapConfig();
+  if (!account || !config) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
   }
 
   const summaryLength = (["short", "medium", "long"].includes(
@@ -59,8 +57,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, summaries: [], emailCount: 0, totalCount, offset });
     }
 
-    // Check DB for which emails are already summarized
-    const existingIds = await getExistingEmailIds(emails.map((e) => e.id));
+    // Check DB for which emails are already summarized (within this account)
+    const existingIds = await getExistingEmailIds(emails.map((e) => e.id), account);
     const allNewEmails = emails.filter((e) => !existingIds.has(e.id));
 
     // Only process up to NEW_EMAIL_BATCH new emails per call to stay under timeout
@@ -69,11 +67,11 @@ export async function POST(request: NextRequest) {
 
     if (newEmails.length > 0) {
       const newSummaries = await summarizeEmails(newEmails, summaryLength);
-      await cacheSummaries(newSummaries);
+      await cacheSummaries(newSummaries, account);
     }
 
     // Return summaries for this full page from DB
-    const summaries = await getSummariesByIds(emails.map((e) => e.id));
+    const summaries = await getSummariesByIds(emails.map((e) => e.id), account);
 
     return NextResponse.json({
       success: true,

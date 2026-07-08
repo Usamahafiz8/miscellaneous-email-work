@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { extractCandidateProfileFromBody } from "@/lib/claude";
 import { parseSections } from "@/lib/parseSections";
+import { currentAccount } from "@/lib/session";
 
 // Allow up to 5 minutes — this loops one AI call per body-only candidate
 export const maxDuration = 300;
@@ -9,14 +10,19 @@ export const maxDuration = 300;
 // POST /api/hiring/backfill-profile — one-time backfill for the structured
 // candidate columns (added for the Candidate Sheet) on already-cached Hiring
 // emails. Two paths, cheapest first:
-//  A) free regex re-parse of already-stored attachmentSummary § bullet text
+//  A) free regex re-parse of already-stored attachmentSummary labeled-line text
 //  B) one AI call per remaining body-only candidate (no attachmentSummary at all)
 // Fresh syncs going forward populate these columns directly (see buildBatchPrompt
 // in lib/claude.ts) — this route only needs to run once against existing data.
 export async function POST() {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
     const rows = await prisma.emailSummary.findMany({
-      where: { category: "Hiring", candidateName: null },
+      where: { account, category: "Hiring", candidateName: null },
       select: { emailId: true, subject: true, from: true, body: true, attachmentSummary: true },
     });
 

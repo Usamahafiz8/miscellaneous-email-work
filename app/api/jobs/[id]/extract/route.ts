@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { parseJobDescription } from "@/lib/claude";
+import { currentAccount } from "@/lib/session";
 
 // POST /api/jobs/[id]/extract — parses the job's pasted jobDescription text via
 // AI and fully overwrites the structured requirement fields with the result.
 export async function POST(_request: NextRequest, { params }: { params: { id: string } }) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    const job = await prisma.jobPosting.findUnique({ where: { id: params.id } });
+    const job = await prisma.jobPosting.findFirst({ where: { id: params.id, account } });
     if (!job) {
       return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
     }

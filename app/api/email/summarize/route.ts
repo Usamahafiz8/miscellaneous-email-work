@@ -2,9 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { summarizeEmails } from "@/lib/claude";
 import { cacheSummaries } from "@/lib/cache";
 import { validateSummarizeRequest } from "@/lib/validation";
+import { currentAccount } from "@/lib/session";
 import type { SummarizeRequest } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -23,7 +29,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const summaries = await summarizeEmails(req.emails, req.summaryLength);
-    await cacheSummaries(summaries);
+    await cacheSummaries(summaries, account);
     return NextResponse.json({ success: true, summaries });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to summarize emails";

@@ -79,10 +79,11 @@ const LIST_SELECT = {
   candidateEmploymentStatus: true, candidateNoticePeriod: true, candidateLocation: true, candidateEmploymentType: true,
 } as const;
 
-export async function getCachedSummaries(query: EmailListQuery): Promise<EmailListResult> {
+export async function getCachedSummaries(query: EmailListQuery, account: string): Promise<EmailListResult> {
   const { page, pageSize, search, keywords, category, priority, status, actionRequired, stage, tags, skills, dateFrom, dateTo, sortBy = "date", sortOrder = "desc" } = query;
 
-  const where: Prisma.EmailSummaryWhereInput = {};
+  // Every list query is tenant-scoped: a user only ever sees their own mailbox.
+  const where: Prisma.EmailSummaryWhereInput = { account };
   if (search?.trim()) {
     // Supports Gmail-style `from:`/`subject:` operators alongside free text —
     // e.g. `from:hr@company.com subject:developer` narrows both fields, while
@@ -126,8 +127,9 @@ export async function getCachedSummaries(query: EmailListQuery): Promise<EmailLi
     const kw = `%${keywords.trim()}%`;
     const matches = await prisma.$queryRaw<{ emailId: string }[]>(Prisma.sql`
       SELECT "emailId" FROM email_summaries
-      WHERE array_to_string("keyPoints", ' ') ILIKE ${kw}
-         OR array_to_string("candidateSkills", ' ') ILIKE ${kw}
+      WHERE "account" = ${account}
+        AND (array_to_string("keyPoints", ' ') ILIKE ${kw}
+         OR array_to_string("candidateSkills", ' ') ILIKE ${kw})
     `);
     where.emailId = { in: matches.map((m) => m.emailId) };
   }
@@ -155,12 +157,12 @@ export async function getCachedSummaries(query: EmailListQuery): Promise<EmailLi
 
 // Cheap COUNT-only queries for sidebar badges — always accurate across the whole
 // dataset, unlike deriving counts from whatever page happens to be loaded client-side.
-export async function getSummaryCounts(): Promise<{ total: number; unread: number; hiring: number; stageCounts: Record<string, number> }> {
+export async function getSummaryCounts(account: string): Promise<{ total: number; unread: number; hiring: number; stageCounts: Record<string, number> }> {
   const [total, unread, hiring, stageGroups] = await Promise.all([
-    prisma.emailSummary.count(),
-    prisma.emailSummary.count({ where: { status: "New" } }),
-    prisma.emailSummary.count({ where: { category: "Hiring" } }),
-    prisma.emailSummary.groupBy({ by: ["stage"], where: { category: "Hiring" }, _count: { stage: true } }),
+    prisma.emailSummary.count({ where: { account } }),
+    prisma.emailSummary.count({ where: { account, status: "New" } }),
+    prisma.emailSummary.count({ where: { account, category: "Hiring" } }),
+    prisma.emailSummary.groupBy({ by: ["stage"], where: { account, category: "Hiring" }, _count: { stage: true } }),
   ]);
   const stageCounts: Record<string, number> = {};
   for (const g of stageGroups) stageCounts[g.stage] = g._count.stage;
@@ -169,33 +171,33 @@ export async function getSummaryCounts(): Promise<{ total: number; unread: numbe
 
 // Distinct tags in use across all emails, for tag-input autocomplete and the
 // tag filter's option list. Cheap: unnest + distinct over a GIN-indexed array column.
-export async function getDistinctTags(): Promise<string[]> {
+export async function getDistinctTags(account: string): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ tag: string }[]>`
-    SELECT DISTINCT unnest(tags) AS tag FROM email_summaries ORDER BY tag
+    SELECT DISTINCT unnest(tags) AS tag FROM email_summaries WHERE "account" = ${account} ORDER BY tag
   `;
   return rows.map((r) => r.tag);
 }
 
 // Distinct AI-extracted skills across all candidates, for the skills filter's
 // option list. Cheap: unnest + distinct over a GIN-indexed array column.
-export async function getDistinctSkills(): Promise<string[]> {
+export async function getDistinctSkills(account: string): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ skill: string }[]>`
-    SELECT DISTINCT unnest("candidateSkills") AS skill FROM email_summaries ORDER BY skill
+    SELECT DISTINCT unnest("candidateSkills") AS skill FROM email_summaries WHERE "account" = ${account} ORDER BY skill
   `;
   return rows.map((r) => r.skill);
 }
 
-export async function getExistingEmailIds(ids: string[]): Promise<Set<string>> {
+export async function getExistingEmailIds(ids: string[], account: string): Promise<Set<string>> {
   const rows = await prisma.emailSummary.findMany({
-    where: { emailId: { in: ids } },
+    where: { account, emailId: { in: ids } },
     select: { emailId: true },
   });
   return new Set(rows.map((r) => r.emailId));
 }
 
-export async function getSummariesByIds(ids: string[]): Promise<EmailSummary[]> {
+export async function getSummariesByIds(ids: string[], account: string): Promise<EmailSummary[]> {
   const rows = await prisma.emailSummary.findMany({
-    where: { emailId: { in: ids } },
+    where: { account, emailId: { in: ids } },
     select: LIST_SELECT,
   });
   // preserve the order of ids
@@ -207,14 +209,16 @@ export async function getSummariesByIds(ids: string[]): Promise<EmailSummary[]> 
 
 // Fetches the full row (including body/htmlBody/attachments) for a single email —
 // used when a user opens an email's detail pane.
-export async function getEmailDetail(emailId: string): Promise<EmailSummary | null> {
-  const row = await prisma.emailSummary.findUnique({ where: { emailId } });
+export async function getEmailDetail(emailId: string, account: string): Promise<EmailSummary | null> {
+  // findFirst (not findUnique) so we can require the row to also belong to this
+  // account — a user must never be able to fetch another tenant's email by id.
+  const row = await prisma.emailSummary.findFirst({ where: { emailId, account } });
   return row ? toEmailSummary(row) : null;
 }
 
 const PRIORITY_RANK: Record<EmailSummary["priority"], number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 
-export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
+export async function cacheSummaries(summaries: EmailSummary[], account: string): Promise<void> {
   if (summaries.length === 0) return;
   // Each upsert is its own round-trip (not a single batched statement), and rows can carry
   // a large htmlBody (tens of KB), so a batch of NEW_EMAIL_BATCH (15) upserts can comfortably
@@ -250,6 +254,7 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
         },
         create: {
           emailId: s.emailId,
+          account,
           from: s.from,
           subject: s.subject,
           date: s.date,
@@ -283,6 +288,6 @@ export async function cacheSummaries(summaries: EmailSummary[]): Promise<void> {
   );
 }
 
-export async function clearCache(): Promise<void> {
-  await prisma.emailSummary.deleteMany();
+export async function clearCache(account: string): Promise<void> {
+  await prisma.emailSummary.deleteMany({ where: { account } });
 }

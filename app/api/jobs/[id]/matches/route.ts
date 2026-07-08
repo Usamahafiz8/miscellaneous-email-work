@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { currentAccount } from "@/lib/session";
 
 // GET /api/jobs/[id]/matches?threshold=N — candidate matches for this job,
 // filtered to matchScore >= threshold (default 0), highest score first.
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    const job = await prisma.jobPosting.findUnique({ where: { id: params.id } });
+    const job = await prisma.jobPosting.findFirst({ where: { id: params.id, account } });
     if (!job) {
       return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
     }

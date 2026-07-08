@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { evaluateCandidate } from "@/lib/claude";
+import { currentAccount } from "@/lib/session";
 import type { HiringCriteria } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
+  if (!currentAccount()) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();

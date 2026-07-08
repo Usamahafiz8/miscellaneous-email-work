@@ -1,19 +1,12 @@
 import { NextResponse } from "next/server";
 import { testIMAPConnection } from "@/lib/imap";
+import { currentImapConfig } from "@/lib/session";
 
+// POST /api/email/connect — re-tests the signed-in user's IMAP connection.
 export async function POST() {
-  const config = {
-    email: process.env.EMAIL_ADDRESS ?? "",
-    password: process.env.EMAIL_PASSWORD ?? "",
-    host: process.env.IMAP_HOST ?? "imap.gmail.com",
-    port: Number(process.env.IMAP_PORT ?? 993),
-  };
-
-  if (!config.email || !config.password || !config.host) {
-    return NextResponse.json(
-      { success: false, error: "Email credentials not configured in .env.local" },
-      { status: 500 }
-    );
+  const config = currentImapConfig();
+  if (!config) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
   }
 
   try {

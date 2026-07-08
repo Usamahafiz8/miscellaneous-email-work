@@ -7,6 +7,8 @@ interface TopBarProps {
   emailCount: number;
   unreadCount: number;
   hiringCount: number;
+  accountEmail: string;
+  onLogout: () => void;
 }
 
 const NAV: { href: string; label: string; badge?: "unread" | "hiring"; icon: JSX.Element }[] = [
@@ -32,8 +34,9 @@ const NAV: { href: string; label: string; badge?: "unread" | "hiring"; icon: JSX
   },
 ];
 
-export default function TopBar({ emailCount, unreadCount, hiringCount }: TopBarProps) {
+export default function TopBar({ emailCount, unreadCount, hiringCount, accountEmail, onLogout }: TopBarProps) {
   const pathname = usePathname();
+  const initial = (accountEmail.trim()[0] || "?").toUpperCase();
 
   return (
     <header className="h-14 flex-shrink-0 bg-[#0f172a] flex items-center px-4 gap-4 border-b border-white/[0.06]">
@@ -77,12 +80,23 @@ export default function TopBar({ emailCount, unreadCount, hiringCount }: TopBarP
       {/* User */}
       <div className="flex items-center gap-2.5 flex-shrink-0">
         <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 text-xs font-bold flex-shrink-0">
-          A
+          {initial}
         </div>
-        <div className="hidden md:block min-w-0">
-          <p className="text-slate-300 text-xs font-medium truncate">access@asadullah.io</p>
+        <div className="hidden md:block min-w-0 max-w-[180px]">
+          <p className="text-slate-300 text-xs font-medium truncate">{accountEmail}</p>
           <p className="text-slate-600 text-[10px]">{emailCount} emails synced</p>
         </div>
+        <button
+          type="button"
+          onClick={onLogout}
+          title="Sign out"
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-white/[0.05] transition-colors"
+        >
+          <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span className="hidden lg:inline text-xs font-medium">Sign out</span>
+        </button>
       </div>
     </header>
   );

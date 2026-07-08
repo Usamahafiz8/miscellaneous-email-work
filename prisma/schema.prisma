@@ -8,6 +8,10 @@ datasource db {
 
 model EmailSummary {
   emailId        String   @id
+  // Tenant key — the lowercased email of the PurelyMail account this summary was
+  // synced from. Every query is scoped by it so users never see each other's mail.
+  // Default attributes pre-existing (single-tenant) rows to the original mailbox.
+  account        String   @default("access@asadullah.io")
   from           String
   subject        String
   date           String
@@ -50,7 +54,8 @@ model EmailSummary {
 
   matches CandidateMatch[]
 
-  @@index([date(sort: Desc)])
+  @@index([account])
+  @@index([account, date(sort: Desc)])
   @@index([category])
   @@index([priorityRank])
   @@index([status])
@@ -64,6 +69,8 @@ model EmailSummary {
 // scans all Hiring candidates for a match score (see CandidateMatch).
 model JobPosting {
   id             String  @id @default(cuid())
+  // Tenant key — see EmailSummary.account. Scopes job postings per signed-in user.
+  account        String  @default("access@asadullah.io")
   title          String
   jobDescription String?
 
@@ -82,6 +89,7 @@ model JobPosting {
 
   matches CandidateMatch[]
 
+  @@index([account])
   @@map("job_postings")
 }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { extractEmploymentDetails } from "@/lib/claude";
+import { currentAccount } from "@/lib/session";
 
 // Allow up to 5 minutes — this loops one AI call per candidate missing any of the 4 new fields
 export const maxDuration = 300;
@@ -11,9 +12,15 @@ export const maxDuration = 300;
 // Fresh syncs going forward populate these directly (see buildBatchPrompt in
 // lib/claude.ts) — this route only needs to run once against existing data.
 export async function POST() {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
     const rows = await prisma.emailSummary.findMany({
       where: {
+        account,
         category: "Hiring",
         OR: [
           { candidateEmploymentStatus: null }, { candidateNoticePeriod: null },

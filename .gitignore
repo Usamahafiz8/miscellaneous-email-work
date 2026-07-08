@@ -19,6 +19,9 @@ build/
 *.tsbuildinfo
 config.bat
 
+# Local Claude Code config
+.claude/
+
 # Persisted email summaries
 .email-summaries.json
 

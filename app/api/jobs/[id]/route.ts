@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { currentAccount } from "@/lib/session";
 
-// GET /api/jobs/[id] — a single job posting.
+// GET /api/jobs/[id] — a single job posting (must belong to the signed-in account).
 export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    const job = await prisma.jobPosting.findUnique({ where: { id: params.id } });
+    const job = await prisma.jobPosting.findFirst({ where: { id: params.id, account } });
     if (!job) {
       return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
     }
@@ -17,8 +23,13 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
 // PATCH /api/jobs/[id] — partial update of a job posting's fields.
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    const existing = await prisma.jobPosting.findUnique({ where: { id: params.id } });
+    const existing = await prisma.jobPosting.findFirst({ where: { id: params.id, account } });
     if (!existing) {
       return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
     }
@@ -68,8 +79,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
 // DELETE /api/jobs/[id] — deletes a job posting; cascades to its CandidateMatch rows.
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    const existing = await prisma.jobPosting.findUnique({ where: { id: params.id } });
+    const existing = await prisma.jobPosting.findFirst({ where: { id: params.id, account } });
     if (!existing) {
       return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
     }

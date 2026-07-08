@@ -66,7 +66,23 @@ export function useDashboard(): DashboardContextValue {
   return ctx;
 }
 
-export default function DashboardProvider({ children }: { children: React.ReactNode }) {
+// A 401 from any API call means the session cookie expired or was cleared —
+// bounce to the login page (hard nav so the (dash) server guard re-runs).
+function redirectToLoginIfUnauthorized(res: Response): boolean {
+  if (res.status === 401 && typeof window !== "undefined") {
+    window.location.href = "/login";
+    return true;
+  }
+  return false;
+}
+
+export default function DashboardProvider({
+  children,
+  accountEmail,
+}: {
+  children: React.ReactNode;
+  accountEmail: string;
+}) {
   const [counts, setCounts] = useState<Counts>({ total: 0, unread: 0, hiring: 0, stageCounts: {} });
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,9 +101,18 @@ export default function DashboardProvider({ children }: { children: React.ReactN
   const [detailCache, setDetailCache] = useState<Map<string, EmailSummary>>(new Map());
   const detailFetchedRef = useRef<Set<string>>(new Set());
 
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      window.location.href = "/login";
+    }
+  }, []);
+
   const refreshCounts = useCallback(async () => {
     try {
       const res = await fetch("/api/summaries/counts");
+      if (redirectToLoginIfUnauthorized(res)) return;
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) {
         setCounts({ total: data.total, unread: data.unread, hiring: data.hiring, stageCounts: data.stageCounts ?? {} });
@@ -116,6 +141,7 @@ export default function DashboardProvider({ children }: { children: React.ReactN
     setIsOverviewLoading(true);
     try {
       const res = await fetch(`/api/email/process?page=1&pageSize=${OVERVIEW_PAGE_SIZE}&sortBy=date&sortOrder=desc`);
+      if (redirectToLoginIfUnauthorized(res)) return;
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) setOverviewSummaries(data.summaries ?? []);
     } catch { /* keep last known overview on failure */ }
@@ -151,6 +177,7 @@ export default function DashboardProvider({ children }: { children: React.ReactN
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ offset: 0 }),
         });
+        if (redirectToLoginIfUnauthorized(res)) return;
         const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
         if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
 
@@ -185,6 +212,7 @@ export default function DashboardProvider({ children }: { children: React.ReactN
     let totalNew = 0;
     try {
       const del = await fetch("/api/summaries", { method: "DELETE" });
+      if (redirectToLoginIfUnauthorized(del)) return;
       if (!del.ok) throw new Error("Failed to clear summaries");
       setSyncVersion((v) => v + 1);
       await Promise.all([refreshCounts(), refreshOverview()]);
@@ -196,6 +224,7 @@ export default function DashboardProvider({ children }: { children: React.ReactN
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ offset: 0 }),
         });
+        if (redirectToLoginIfUnauthorized(res)) return;
         const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
         if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
 
@@ -278,7 +307,13 @@ export default function DashboardProvider({ children }: { children: React.ReactN
 
   return (
     <div className="flex flex-col h-screen bg-white overflow-hidden font-sans">
-      <TopBar emailCount={counts.total} unreadCount={counts.unread} hiringCount={counts.hiring} />
+      <TopBar
+        emailCount={counts.total}
+        unreadCount={counts.unread}
+        hiringCount={counts.hiring}
+        accountEmail={accountEmail}
+        onLogout={logout}
+      />
 
       {/* Sync feedback banner */}
       {syncMessage && (

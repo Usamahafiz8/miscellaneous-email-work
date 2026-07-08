@@ -2,15 +2,21 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { extractPdfText } from "@/lib/pdf";
 import { summarizePdfAttachment } from "@/lib/claude";
+import { currentAccount } from "@/lib/session";
 import type { EmailAttachment } from "@/lib/types";
 
 // POST /api/email/pdf-summaries
 // Reads existing emails from DB, extracts PDF text, generates attachmentSummary — no IMAP needed
 export async function POST() {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    // Load all emails that have attachments stored
+    // Load this account's emails that have attachments stored
     const rows = await prisma.emailSummary.findMany({
-      where: { attachments: { not: null } },
+      where: { account, attachments: { not: null } },
       select: { emailId: true, subject: true, from: true, attachments: true },
     });
 

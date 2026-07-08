@@ -2,14 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCachedSummaries, clearCache } from "@/lib/cache";
 import { parseEmailListQuery } from "@/lib/queryParams";
 import { prisma } from "@/lib/db";
+import { currentAccount } from "@/lib/session";
 import { STATUSES, STAGES } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const query = parseEmailListQuery(searchParams);
 
   try {
-    const result = await getCachedSummaries(query);
+    const result = await getCachedSummaries(query, account);
     return NextResponse.json({ success: true, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch summaries";
@@ -19,6 +25,11 @@ export async function GET(request: NextRequest) {
 
 // PATCH /api/summaries — update a single email's status, stage, and/or tags
 export async function PATCH(request: NextRequest) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
     const body = await request.json() as { emailId: string; status?: string; stage?: string; tags?: string[] };
     const { emailId, status, stage, tags } = body;
@@ -47,7 +58,11 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Nothing to update" }, { status: 400 });
     }
 
-    await prisma.emailSummary.update({ where: { emailId }, data });
+    // Scope by account so a user can only patch their own emails.
+    const { count } = await prisma.emailSummary.updateMany({ where: { emailId, account }, data });
+    if (count === 0) {
+      return NextResponse.json({ success: false, error: "Email not found" }, { status: 404 });
+    }
     return NextResponse.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update email";
@@ -56,8 +71,13 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE() {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    await clearCache();
+    await clearCache(account);
     return NextResponse.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to clear cache";

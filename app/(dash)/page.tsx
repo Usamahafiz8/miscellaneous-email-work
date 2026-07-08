@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { useDashboard } from "./components/DashboardProvider";
-import DashboardHome from "./components/DashboardHome";
+import { useDashboard } from "@/app/components/DashboardProvider";
+import DashboardHome from "@/app/components/DashboardHome";
 
 export default function Home() {
   const { overviewSummaries, isOverviewLoading, isSyncing, lastFetched, syncEmails, loadOverviewIfNeeded } = useDashboard();

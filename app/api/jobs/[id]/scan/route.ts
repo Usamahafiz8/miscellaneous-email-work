@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { matchCandidateToJob } from "@/lib/claude";
+import { currentAccount } from "@/lib/session";
 
 // Allow up to 5 minutes — this loops one AI call per Hiring candidate.
 export const maxDuration = 300;
@@ -8,8 +9,13 @@ export const maxDuration = 300;
 // POST /api/jobs/[id]/scan — scores every Hiring-category candidate against
 // this job's requirements and upserts a CandidateMatch row per candidate.
 export async function POST(_request: NextRequest, { params }: { params: { id: string } }) {
+  const account = currentAccount();
+  if (!account) {
+    return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+  }
+
   try {
-    const job = await prisma.jobPosting.findUnique({ where: { id: params.id } });
+    const job = await prisma.jobPosting.findFirst({ where: { id: params.id, account } });
     if (!job) {
       return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
     }
@@ -32,7 +38,7 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
     }
 
     const candidates = await prisma.emailSummary.findMany({
-      where: { category: "Hiring" },
+      where: { account, category: "Hiring" },
       select: {
         emailId: true, subject: true, summary: true, keyPoints: true,
         candidateName: true, candidateRole: true, candidateExperience: true, candidateSkills: true,
