@@ -48,7 +48,7 @@ Body: ${body}${attachmentSection}`;
 
   const hasAttachments = attachmentTexts && attachmentTexts.size > 0;
   const attachmentSummaryField = hasAttachments
-    ? `\n    "attachmentSummary": "ONLY for emails whose block above contains an 'Attachment N content:' line: extract structured info from THAT attachment text as § bullet lines. Format: '§ Label: Value'. Include these sections (omit if no data): § Document Type, § Name, § Current Role, § Total Experience, § Work History (Company — Role, Year–Year per entry), § Technologies & Skills (comma list), § Education (Degree — University — Year), § Key Achievements, § Other Details. Be specific — real names, companies, years, tech stacks. Output only the § lines, nothing else. For any email block that says 'Attachments: none', you MUST set attachmentSummary to null — never fabricate or infer attachment content from the email body or subject, even if the body mentions an attached CV/resume.",`
+    ? `\n    "attachmentSummary": "ONLY for emails whose block above contains an 'Attachment N content:' line: extract structured info from THAT attachment text as labeled lines. Format: 'Label: Value', one per line, no bullet symbol. Include these sections (omit if no data): Document Type, Name, Current Role, Total Experience, Work History (Company — Role, Year–Year per entry), Technologies & Skills (comma list), Education (Degree — University — Year), Key Achievements, Other Details. Be specific — real names, companies, years, tech stacks. Output only those lines, nothing else. For any email block that says 'Attachments: none', you MUST set attachmentSummary to null — never fabricate or infer attachment content from the email body or subject, even if the body mentions an attached CV/resume.",`
     : `\n    "attachmentSummary": null,`;
 
   return `You are analyzing business emails for a company dashboard. Analyze ALL emails below and respond ONLY with a valid JSON array — no markdown, no code blocks.
@@ -74,13 +74,62 @@ Category rules: Hiring=resumes/applications, Client Support=customer issues, Sal
 Priority rules: Critical=server down/urgent legal, High=client awaiting reply/urgent meetings, Medium=standard correspondence, Low=newsletters/notifications
 actionRequired: Yes=needs human response/action, No=informational only
 keyPoints rules: Extract the most important, specific facts. For hiring emails: years of experience, skills, role applied for, education, notable achievements, availability, expected salary. For other emails: action items, deadlines, amounts, decisions, people mentioned. Each point must be a complete, self-contained fact (not vague like "good candidate"). Aim for 5 points minimum.
-attachmentSummary: Only for emails whose block includes an "Attachment N content:" line. Must begin with "In this PDF, we have a [resume/invoice/CV/report/etc.] that contains:" and then describe the actual content of THAT attachment text — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — whatever is present in the PDF text. Be specific and factual, and base it strictly on the attachment text, never on the email body or subject. Set to null if the email's block says "Attachments: none" — do not guess or fabricate.
+attachmentSummary: Only for emails whose block includes an "Attachment N content:" line. Follow the exact line format specified above — one "Label: Value" line per line break (use real \n newlines between lines, no bullet symbol), no intro sentence, no prose, nothing before or after those lines. Base it strictly on the attachment text — candidate experience, skills, education, salary expectations, company names, dates, figures, totals, decisions — never on the email body or subject. Set to null if the email's block says "Attachments: none" — do not guess or fabricate.
 candidateProfile: ONLY for emails you categorized as Hiring. Extract from whichever source has real candidate data — the attachment text if present, otherwise the email body itself (a body-only job application still counts). Fill only fields with real, specific data (real name, real skill names, real years) — omit/null a field rather than guess. Set the entire object to null for non-Hiring emails. Never fabricate from the subject line alone. Also extract, when mentioned: employmentStatus (e.g. Currently Employed/Unemployed/serving notice), noticePeriod (e.g. Immediate, 30 days), location (city/country or remote), employmentType (Full-time/Contract/Part-time). Omit any of these four not mentioned rather than guessing.`;
 }
 
-function safeParseJSON(text: string): Record<string, unknown>[] {
+// Models frequently emit raw newlines/tabs inside string values (e.g. the
+// multi-line attachmentSummary), which is invalid JSON and makes JSON.parse
+// throw "Bad control character in string literal". Walk the text and escape any
+// unescaped control char that appears while we're inside a string literal.
+function escapeControlCharsInStrings(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        out += ch;
+        inString = false;
+        continue;
+      }
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        out += ch === "\n" ? "\\n" : ch === "\t" ? "\\t" : ch === "\r" ? "\\r"
+          : "\\u" + code.toString(16).padStart(4, "0");
+        continue;
+      }
+      out += ch;
+    } else {
+      out += ch;
+      if (ch === '"') inString = true;
+    }
+  }
+  return out;
+}
+
+// Strips code fences and repairs raw control chars, then parses model JSON.
+function parseModelJSON(text: string): unknown {
   const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-  const parsed: unknown = JSON.parse(cleaned);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    return JSON.parse(escapeControlCharsInStrings(cleaned));
+  }
+}
+
+function safeParseJSON(text: string): Record<string, unknown>[] {
+  const parsed = parseModelJSON(text);
   if (!Array.isArray(parsed)) throw new Error(`AI returned non-array JSON: ${typeof parsed}`);
   return parsed as Record<string, unknown>[];
 }
@@ -190,24 +239,24 @@ From: ${from}
 PDF Content:
 ${pdfTexts.map((t, i) => `Attachment ${i + 1}:\n${t.slice(0, 6000)}`).join("\n\n")}
 
-Extract and format the key information as labeled bullet points exactly like this (omit any section that has no data):
+Extract and format the key information as labeled lines exactly like this, one per line with no bullet symbol (omit any section that has no data):
 
-§ Document Type: [Resume / CV / Invoice / Report / Contract / etc.]
-§ Name: [Full name of the person if resume/CV]
-§ Current Role: [Most recent or current job title]
-§ Total Experience: [e.g. "8+ years in full-stack development"]
-§ Work History: [Company Name — Role (Year–Year), Company Name — Role (Year–Year), ...]
-§ Technologies & Skills: [comma-separated list of tools, languages, frameworks]
-§ Education: [Degree — University — Year]
-§ Key Achievements: [notable accomplishments, awards, metrics]
-§ Other Details: [salary expectations, availability, location, visa status, or for invoices: total amount, due date, items]
+Document Type: [Resume / CV / Invoice / Report / Contract / etc.]
+Name: [Full name of the person if resume/CV]
+Current Role: [Most recent or current job title]
+Total Experience: [e.g. "8+ years in full-stack development"]
+Work History: [Company Name — Role (Year–Year), Company Name — Role (Year–Year), ...]
+Technologies & Skills: [comma-separated list of tools, languages, frameworks]
+Education: [Degree — University — Year]
+Key Achievements: [notable accomplishments, awards, metrics]
+Other Details: [salary expectations, availability, location, visa status, or for invoices: total amount, due date, items]
 
 Rules:
 - Be specific. Write real names, real companies, real years, real technologies — not vague descriptions.
 - For each work history entry include the company name, role, and dates if available.
 - For technologies list everything mentioned: languages, frameworks, databases, tools, cloud platforms.
 - If this is not a resume (e.g. invoice, contract, report), adapt the sections to what makes sense for that document type.
-- Respond ONLY with the § bullet lines, nothing else.`;
+- Respond ONLY with those lines, nothing else — no bullet symbol, no intro sentence.`;
 
   const message = await getClient().chat.completions.create({
     model: "meta-llama/llama-3.3-70b-instruct",
@@ -254,8 +303,7 @@ If there is no real candidate data in this email at all, respond with: null`;
   const text = message.choices[0]?.message?.content?.trim();
   if (!text || text === "null") return null;
   try {
-    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const parsed = parseModelJSON(text) as Record<string, unknown>;
     return {
       name: parsed.name ? String(parsed.name) : undefined,
       role: parsed.role ? String(parsed.role) : undefined,
@@ -289,8 +337,7 @@ If there is no real hiring content in this text at all, respond with: null`;
   const text = message.choices[0]?.message?.content?.trim();
   if (!text || text === "null") return null;
   try {
-    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const parsed = parseModelJSON(text) as Record<string, unknown>;
     return {
       minExperienceYears: typeof parsed.minExperienceYears === "number" ? parsed.minExperienceYears : undefined,
       maxExperienceYears: typeof parsed.maxExperienceYears === "number" ? parsed.maxExperienceYears : undefined,
@@ -360,8 +407,7 @@ Respond ONLY with valid JSON:
     });
     const text = message.choices[0]?.message?.content;
     if (!text) return null;
-    const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const parsed = parseModelJSON(text) as Record<string, unknown>;
     const matchScore = typeof parsed.matchScore === "number" ? Math.max(0, Math.min(100, Math.round(parsed.matchScore))) : 0;
     return {
       matchScore,
@@ -393,8 +439,7 @@ If none of these are mentioned at all, respond with: null`;
   const text = message.choices[0]?.message?.content?.trim();
   if (!text || text === "null") return null;
   try {
-    const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const parsed = parseModelJSON(text) as Record<string, unknown>;
     return {
       employmentStatus: parsed.employmentStatus ? String(parsed.employmentStatus) : undefined,
       noticePeriod: parsed.noticePeriod ? String(parsed.noticePeriod) : undefined,
@@ -438,6 +483,5 @@ Analyze whether this candidate meets the requirements. Respond ONLY with valid J
   const text = message.choices[0]?.message?.content;
   if (!text) throw new Error("No text in response");
 
-  const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
-  return JSON.parse(cleaned) as CandidateEvaluation;
+  return parseModelJSON(text) as CandidateEvaluation;
 }
