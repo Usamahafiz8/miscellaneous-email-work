@@ -17,7 +17,12 @@ function getClient(): OpenAI {
   return _client;
 }
 
-const MAX_TOKENS: Record<SummaryLength, number> = { short: 1800, medium: 2400, long: 3200 };
+// Budget per batch of CHUNK_SIZE emails. Each object (summary + keyPoints +
+// candidateProfile + a structured attachmentSummary) can run several hundred
+// tokens, so these must comfortably exceed CHUNK_SIZE * per-email size or the
+// array gets truncated mid-output. safeParseJSON salvages partial arrays, but
+// generous ceilings avoid dropping emails in the first place.
+const MAX_TOKENS: Record<SummaryLength, number> = { short: 3500, medium: 5000, long: 7000 };
 const BODY_LIMIT = 800;  // chars per email in the batch prompt
 const CHUNK_SIZE = 8;    // emails per API call
 
@@ -118,9 +123,13 @@ function escapeControlCharsInStrings(text: string): string {
   return out;
 }
 
+function stripFences(text: string): string {
+  return text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+}
+
 // Strips code fences and repairs raw control chars, then parses model JSON.
 function parseModelJSON(text: string): unknown {
-  const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "");
+  const cleaned = stripFences(text);
   try {
     return JSON.parse(cleaned);
   } catch {
@@ -128,10 +137,68 @@ function parseModelJSON(text: string): unknown {
   }
 }
 
+// Recovers every complete top-level object from a JSON array that was cut off
+// mid-output (model hit max_tokens -> "Unterminated string" / "Unexpected end
+// of JSON input"). Walks the text tracking string/escape state and brace depth,
+// remembers the last position where a top-level element closed, then reparses up
+// to there — dropping only the truncated trailing object. Returns null if there
+// isn't even one complete object to salvage.
+function salvageJSONArray(text: string): Record<string, unknown>[] | null {
+  const cleaned = stripFences(text);
+  const start = cleaned.indexOf("[");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let lastElementEnd = -1;  // index of the "}" that closed the last complete element
+  let closedNormally = false;
+
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{" || ch === "[") {
+      depth++;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth === 1 && ch === "}") lastElementEnd = i;
+      if (depth === 0) { closedNormally = true; lastElementEnd = i; break; }
+    }
+  }
+
+  if (lastElementEnd === -1) return null;
+  const body = closedNormally
+    ? cleaned.slice(start, lastElementEnd + 1)
+    : cleaned.slice(start, lastElementEnd + 1) + "]";
+  try {
+    const parsed = JSON.parse(escapeControlCharsInStrings(body));
+    return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 function safeParseJSON(text: string): Record<string, unknown>[] {
-  const parsed = parseModelJSON(text);
-  if (!Array.isArray(parsed)) throw new Error(`AI returned non-array JSON: ${typeof parsed}`);
-  return parsed as Record<string, unknown>[];
+  try {
+    const parsed = parseModelJSON(text);
+    if (Array.isArray(parsed)) return parsed as Record<string, unknown>[];
+    throw new Error(`AI returned non-array JSON: ${typeof parsed}`);
+  } catch (err) {
+    // Truncated or otherwise malformed: recover whatever complete objects we can
+    // rather than dropping the entire batch.
+    const salvaged = salvageJSONArray(text);
+    if (salvaged && salvaged.length) {
+      console.warn(`safeParseJSON: recovered ${salvaged.length} complete object(s) from a malformed/truncated AI response`);
+      return salvaged;
+    }
+    throw err;
+  }
 }
 
 async function summarizeChunk(
@@ -161,6 +228,10 @@ async function summarizeChunk(
 
   const text = message.choices[0]?.message?.content;
   if (!text) throw new Error("No text in response");
+
+  if (message.choices[0]?.finish_reason === "length") {
+    console.warn(`summarizeChunk: response hit max_tokens (${MAX_TOKENS[summaryLength]}) for ${emails.length} emails — output truncated, salvaging complete entries`);
+  }
 
   const parsed: Record<string, unknown>[] = safeParseJSON(text);
   const emailMap = new Map(emails.map((e) => [e.id, e]));
