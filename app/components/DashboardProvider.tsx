@@ -229,7 +229,38 @@ export default function DashboardProvider({
     }
   }, [refreshCounts, refreshOverview, summarizePending]);
 
-  // Clear DB then re-fetch the newest mail and re-summarize it from scratch.
+  // Page through the ENTIRE mailbox (offset 0, 50, 100, …) storing every message
+  // as a raw row. Returns total new emails stored. Shared by Fetch All & Re-sync.
+  const pageThroughMailbox = useCallback(async (label: string): Promise<number> => {
+    let offset = 0;
+    let totalNew = 0;
+    let totalCount = 0;
+    // Safety cap: 1000 pages (server PAGE_SIZE 50 → up to 50k messages).
+    for (let i = 0; i < 1000; i++) {
+      const res = await fetch("/api/email/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset }),
+      });
+      if (redirectToLoginIfUnauthorized(res)) return totalNew;
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to fetch emails");
+
+      totalNew += data.newCount ?? 0;
+      totalCount = data.totalCount ?? 0;
+      const fetched = data.fetched ?? 0;
+      offset += fetched;
+      setSyncVersion((v) => v + 1);
+      await Promise.all([refreshCounts(), refreshOverview()]);
+      setSyncMessage(`${label} ${Math.min(offset, totalCount)}/${totalCount} scanned, ${totalNew} new`);
+
+      if (fetched === 0 || offset >= totalCount) break;
+    }
+    return totalNew;
+  }, [refreshCounts, refreshOverview]);
+
+  // Clear the DB, then re-import the WHOLE mailbox and re-summarize from scratch —
+  // a clean full rebuild (also the way to purge legacy duplicate rows).
   const clearAndResync = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
@@ -241,20 +272,8 @@ export default function DashboardProvider({
       setSyncVersion((v) => v + 1);
       await Promise.all([refreshCounts(), refreshOverview()]);
 
-      // Re-fetch newest mail as raw rows…
-      const res = await fetch("/api/email/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset: 0 }),
-      });
-      if (redirectToLoginIfUnauthorized(res)) return;
-      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
-      setSyncVersion((v) => v + 1);
-      await Promise.all([refreshCounts(), refreshOverview()]);
-      setSyncMessage("Re-fetching… summarizing emails…");
-
-      // …then summarize them all.
+      const totalNew = await pageThroughMailbox("Re-importing all mail…");
+      setSyncMessage(`Re-fetched ${totalNew} email${totalNew === 1 ? "" : "s"} — summarizing…`);
       const summarized = await summarizePending("Re-syncing…");
 
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
@@ -264,41 +283,16 @@ export default function DashboardProvider({
     } finally {
       setIsSyncing(false);
     }
-  }, [refreshCounts, refreshOverview, summarizePending]);
+  }, [refreshCounts, refreshOverview, pageThroughMailbox, summarizePending]);
 
-  // Fetch the WHOLE mailbox, not just the newest page: page through IMAP by
-  // advancing offset until every message has been scanned, storing new ones as
-  // raw rows, then summarize all pending. For an initial full import / backfill.
+  // Import the WHOLE mailbox (without clearing) and summarize all pending — for a
+  // full backfill on top of whatever is already stored.
   const fetchAllEmails = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
     setError(null);
     try {
-      let offset = 0;
-      let totalNew = 0;
-      let totalCount = 0;
-      // Safety cap: 1000 pages (server PAGE_SIZE 50 → up to 50k messages).
-      for (let i = 0; i < 1000; i++) {
-        const res = await fetch("/api/email/process", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ offset }),
-        });
-        if (redirectToLoginIfUnauthorized(res)) return;
-        const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-        if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to fetch emails");
-
-        totalNew += data.newCount ?? 0;
-        totalCount = data.totalCount ?? 0;
-        const fetched = data.fetched ?? 0;
-        offset += fetched;
-        setSyncVersion((v) => v + 1);
-        await Promise.all([refreshCounts(), refreshOverview()]);
-        setSyncMessage(`Importing all mail… ${Math.min(offset, totalCount)}/${totalCount} scanned, ${totalNew} new`);
-
-        if (fetched === 0 || offset >= totalCount) break;
-      }
-
+      const totalNew = await pageThroughMailbox("Importing all mail…");
       setSyncMessage(`Imported ${totalNew} new email${totalNew === 1 ? "" : "s"} — summarizing…`);
       const summarized = await summarizePending("Summarizing…");
 
@@ -311,7 +305,7 @@ export default function DashboardProvider({
     } finally {
       setIsSyncing(false);
     }
-  }, [refreshCounts, refreshOverview, summarizePending]);
+  }, [pageThroughMailbox, summarizePending]);
 
   // List rows omit body/htmlBody/attachments to keep page payloads light — fetch
   // the full content for one email the moment its detail pane is opened, caching
