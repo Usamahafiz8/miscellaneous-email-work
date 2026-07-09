@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchEmails } from "@/lib/imap";
-import { summarizeEmails } from "@/lib/claude";
-import { cacheSummaries, getCachedSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
+import { cacheRawEmails, getCachedSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
 import { parseEmailListQuery } from "@/lib/queryParams";
 import { currentAccount, currentImapConfig } from "@/lib/session";
-import type { SummaryLength } from "@/lib/types";
 
-// Allow up to 5 minutes — required for Vercel Pro; on Hobby plan cap is 60s
-export const maxDuration = 300;
+// No LLM here anymore (POST just IMAP-fetches a page and stores raw rows; GET is
+// DB-only), but the IMAP fetch has a 30s internal timeout, so keep 60s headroom.
+export const maxDuration = 60;
 
 const PAGE_SIZE = 50;
-// Max new emails to summarize per single sync call — keeps the request under timeout
-const NEW_EMAIL_BATCH = 15;
 
 // Load emails from DB only — no IMAP, no AI calls. Supports the same
 // filter/sort/page query contract as GET /api/summaries.
@@ -33,19 +30,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Sync from IMAP — runs AI only for emails not already in DB
+// Sync from IMAP — stores newly-fetched emails as raw, un-summarized rows. No AI
+// runs here: the LLM is invoked lazily the first time an email is opened (see
+// POST /api/email/resync), so a sync is fast and cheap regardless of volume.
 export async function POST(request: NextRequest) {
   const account = currentAccount();
   const config = currentImapConfig();
   if (!account || !config) {
     return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
   }
-
-  const summaryLength = (["short", "medium", "long"].includes(
-    process.env.SUMMARY_LENGTH ?? ""
-  )
-    ? process.env.SUMMARY_LENGTH
-    : "medium") as SummaryLength;
 
   const body = await request.json().catch(() => ({}));
   const offset = Math.max(0, Number(body.offset ?? 0));
@@ -54,32 +47,26 @@ export async function POST(request: NextRequest) {
     const { emails, totalCount } = await fetchEmails(config, PAGE_SIZE, offset);
 
     if (emails.length === 0) {
-      return NextResponse.json({ success: true, summaries: [], emailCount: 0, totalCount, offset });
+      return NextResponse.json({ success: true, summaries: [], emailCount: 0, newCount: 0, pendingCount: 0, totalCount, offset });
     }
 
-    // Check DB for which emails are already summarized (within this account)
+    // Which of this page's emails aren't in the DB yet (within this account)
     const existingIds = await getExistingEmailIds(emails.map((e) => e.id), account);
-    const allNewEmails = emails.filter((e) => !existingIds.has(e.id));
+    const newEmails = emails.filter((e) => !existingIds.has(e.id));
 
-    // Only process up to NEW_EMAIL_BATCH new emails per call to stay under timeout
-    const newEmails = allNewEmails.slice(0, NEW_EMAIL_BATCH);
-    const pendingCount = allNewEmails.length - newEmails.length;
+    // Store the new ones as raw rows — no AI call, no batch cap needed.
+    const newCount = await cacheRawEmails(newEmails, account);
 
-    if (newEmails.length > 0) {
-      const newSummaries = await summarizeEmails(newEmails, summaryLength);
-      await cacheSummaries(newSummaries, account);
-    }
-
-    // Return summaries for this full page from DB
+    // Return this full page from DB (raw rows included, marked summarized=false)
     const summaries = await getSummariesByIds(emails.map((e) => e.id), account);
 
     return NextResponse.json({
       success: true,
       summaries,
       emailCount: summaries.length,
-      newCount: newEmails.length,
-      // pendingCount > 0 means there are more new emails to process — client should call again
-      pendingCount,
+      newCount,
+      // No deferred AI work anymore — a single call fully syncs the page.
+      pendingCount: 0,
       totalCount,
       offset,
     });

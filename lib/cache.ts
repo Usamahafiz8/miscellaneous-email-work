@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
-import type { EmailSummary, EmailAttachment, EmailListQuery, EmailListResult } from "./types";
+import type { EmailSummary, EmailMessage, EmailAttachment, EmailListQuery, EmailListResult } from "./types";
 import { parseSearchQuery } from "./searchQuery";
 
 function toEmailSummary(row: {
@@ -16,6 +16,7 @@ function toEmailSummary(row: {
   candidateEducation: string | null; candidateAchievements: string | null;
   candidateEmploymentStatus: string | null; candidateNoticePeriod: string | null;
   candidateLocation: string | null; candidateEmploymentType: string | null;
+  summarized?: boolean;
 }, opts: { stripAttachmentData?: boolean } = {}): EmailSummary {
   let attachments: EmailAttachment[] | undefined;
   if (row.attachments) {
@@ -59,6 +60,9 @@ function toEmailSummary(row: {
     candidateLocation: row.candidateLocation ?? undefined,
     candidateEmploymentType: row.candidateEmploymentType ?? undefined,
     fetchedAt: row.fetchedAt.toISOString(),
+    // Undefined-safe: rows selected without this column (older callers) read as
+    // summarized so the UI never shows a false "pending" state.
+    summarized: row.summarized ?? true,
   };
 }
 
@@ -73,7 +77,7 @@ const LIST_SELECT = {
   attachmentSummary: true,
   summary: true, keyPoints: true, sentiment: true, category: true,
   priority: true, actionRequired: true, purpose: true, status: true, fetchedAt: true,
-  stage: true, tags: true,
+  stage: true, tags: true, summarized: true,
   candidateName: true, candidateRole: true, candidateExperience: true,
   candidateSkills: true, candidateEducation: true, candidateAchievements: true,
   candidateEmploymentStatus: true, candidateNoticePeriod: true, candidateLocation: true, candidateEmploymentType: true,
@@ -229,6 +233,7 @@ export async function cacheSummaries(summaries: EmailSummary[], account: string)
       prisma.emailSummary.upsert({
         where: { emailId: s.emailId },
         update: {
+          summarized: true,
           summary: s.summary,
           keyPoints: s.keyPoints,
           sentiment: s.sentiment,
@@ -255,6 +260,7 @@ export async function cacheSummaries(summaries: EmailSummary[], account: string)
         create: {
           emailId: s.emailId,
           account,
+          summarized: true,
           from: s.from,
           subject: s.subject,
           date: s.date,
@@ -286,6 +292,44 @@ export async function cacheSummaries(summaries: EmailSummary[], account: string)
     ),
     { timeout: 60_000, maxWait: 10_000 }
   );
+}
+
+// Stores freshly-fetched emails as raw, un-summarized rows (summarized=false) so
+// they appear in the inbox immediately without any AI call — the LLM fills in the
+// summary/category/candidate fields lazily on first open (see the resync route).
+// Uses createMany + skipDuplicates so rows that already exist (summarized OR still
+// pending) are left completely untouched: we never clobber an existing summary or
+// the user's status/stage/tags. Returns how many new rows were inserted.
+export async function cacheRawEmails(
+  emails: Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody" | "attachments">[],
+  account: string
+): Promise<number> {
+  if (emails.length === 0) return 0;
+  const { count } = await prisma.emailSummary.createMany({
+    data: emails.map((e) => ({
+      emailId: e.id,
+      account,
+      summarized: false,
+      from: e.from,
+      subject: e.subject,
+      date: e.date,
+      body: e.fullText ?? null,
+      htmlBody: e.htmlBody ?? null,
+      attachments: e.attachments ? JSON.stringify(e.attachments) : null,
+      // Placeholder AI fields — schema-valid (these columns are non-null) and
+      // neutral. Overwritten the first time the email is opened & summarized.
+      summary: "",
+      keyPoints: [],
+      sentiment: "neutral",
+      category: "General",
+      priority: "Medium",
+      priorityRank: 2,
+      actionRequired: "No",
+      purpose: "",
+    })),
+    skipDuplicates: true,
+  });
+  return count;
 }
 
 export async function clearCache(account: string): Promise<void> {

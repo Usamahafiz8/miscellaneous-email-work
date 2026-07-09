@@ -61,6 +61,9 @@ export interface EmailSummary {
   candidateLocation?: string;
   candidateEmploymentType?: string;
   fetchedAt?: string;
+  // False for raw-synced emails whose AI summary hasn't been generated yet — the
+  // LLM runs lazily the first time the email is opened. See lib/cache.ts.
+  summarized?: boolean;
 }
 
 export interface HiringCriteria {

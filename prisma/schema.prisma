@@ -31,6 +31,12 @@ model EmailSummary {
   stage             String   @default("New") // hiring pipeline folder — only meaningful when category="Hiring"
   tags              String[] @default([])    // free-form, user-added, any email
 
+  // Lazy-summarization flag. Sync stores raw emails with summarized=false (no AI
+  // run yet); the LLM fills in the summary/category/priority/candidate fields the
+  // first time the email is opened, flipping this to true. Defaults true so every
+  // pre-existing (already-summarized) row keeps its current behaviour.
+  summarized        Boolean  @default(true)
+
   // Structured candidate profile — scalar columns (not a Json blob) so the
   // Candidate Sheet can render/sort/filter each field directly, the same way
   // keyPoints already works. Populated by the AI batch prompt for Hiring

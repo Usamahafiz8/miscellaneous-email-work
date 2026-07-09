@@ -194,7 +194,7 @@ export default function DashboardProvider({
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setSyncMessage(
         totalNew > 0
-          ? `${totalNew} new email${totalNew === 1 ? "" : "s"} found and summarized`
+          ? `${totalNew} new email${totalNew === 1 ? "" : "s"} synced — summaries generate as you open them`
           : "Already up to date — no new emails"
       );
     } catch (err) {
@@ -257,19 +257,42 @@ export default function DashboardProvider({
     (async () => {
       try {
         const res = await fetch(`/api/summaries/${encodeURIComponent(emailId)}`);
+        if (redirectToLoginIfUnauthorized(res)) return;
         const data = await res.json().catch(() => null);
-        if (res.ok && data?.success && data.summary) {
-          setDetailCache((prev) => new Map(prev).set(emailId, data.summary));
-        } else {
+        if (!res.ok || !data?.success || !data.summary) {
           detailFetchedRef.current.delete(emailId);
+          return;
         }
+
+        let summary: EmailSummary = data.summary;
+        // Lazy AI summarization: raw-synced emails arrive with summarized=false and
+        // empty AI fields. Run the LLM on this one email the first time it's opened
+        // (reusing the resync route), then cache the filled-in result.
+        if (summary.summarized === false) {
+          const sres = await fetch("/api/email/resync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ emailId }),
+          });
+          const sdata = await sres.json().catch(() => null);
+          if (sres.ok && sdata?.success && sdata.summary) {
+            summary = { ...sdata.summary, summarized: true };
+            // Category/priority/hiring fields just materialized — refresh the badges.
+            refreshCounts();
+          } else {
+            // Summarization failed: allow a later retry rather than caching the miss.
+            detailFetchedRef.current.delete(emailId);
+          }
+        }
+
+        setDetailCache((prev) => new Map(prev).set(emailId, summary));
       } catch {
         detailFetchedRef.current.delete(emailId);
       } finally {
         setLoadingDetailId((id) => (id === emailId ? null : id));
       }
     })();
-  }, []);
+  }, [refreshCounts]);
 
   const getEmailDetail = useCallback((emailId: string) => detailCache.get(emailId), [detailCache]);
 

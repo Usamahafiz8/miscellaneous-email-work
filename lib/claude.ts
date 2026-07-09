@@ -250,6 +250,9 @@ async function summarizeChunk(
       body: original?.fullText ?? "",
       htmlBody: original?.htmlBody ?? undefined,
       attachments: original?.attachments,
+      // A freshly summarized email is, by definition, summarized — lets the client
+      // flip the row out of its "pending" state without a refetch.
+      summarized: true,
       summary: String(item.summary ?? ""),
       keyPoints: Array.isArray(item.keyPoints) ? (item.keyPoints as string[]).slice(0, 8) : [],
       sentiment: VALID_SENTIMENTS.includes(item.sentiment as Sentiment) ? (item.sentiment as Sentiment) : "neutral",

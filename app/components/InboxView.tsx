@@ -78,24 +78,30 @@ const FULL_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
   },
   {
     key: "summary", header: "AI Summary", width: "280px",
-    render: (r) => <span className="block text-xs text-gray-500 whitespace-normal break-words py-1">{r.summary}</span>,
+    render: (r) => r.summarized === false
+      ? <span className="block text-xs italic text-gray-400 py-1">Not summarized yet — open to generate</span>
+      : <span className="block text-xs text-gray-500 whitespace-normal break-words py-1">{r.summary}</span>,
   },
   {
     key: "category", header: "Category", width: "120px",
-    render: (r) => (
-      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset whitespace-nowrap ${CATEGORY_BADGE[r.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
-        {r.category}
-      </span>
-    ),
+    render: (r) => r.summarized === false
+      ? <span className="text-[10px] text-gray-300">—</span>
+      : (
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset whitespace-nowrap ${CATEGORY_BADGE[r.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
+          {r.category}
+        </span>
+      ),
   },
   {
     key: "priority", header: "Priority", width: "110px",
-    render: (r) => (
-      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${PRIORITY_BADGE[r.priority]}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[r.priority]}`} />
-        {r.priority}
-      </span>
-    ),
+    render: (r) => r.summarized === false
+      ? <span className="text-[10px] text-gray-300">—</span>
+      : (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${PRIORITY_BADGE[r.priority]}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[r.priority]}`} />
+          {r.priority}
+        </span>
+      ),
   },
   {
     key: "actionRequired", header: "Action", width: "90px",
@@ -291,6 +297,31 @@ export default function InboxView() {
     setDetailTab("summary");
     loadEmailDetail(selectedId);
   }, [selectedId, loadEmailDetail]);
+
+  // When a lazily-summarized email finishes (its detail-cache entry flips to
+  // summarized), fold the AI fields back into the matching list row so it leaves
+  // the "pending" state in place — no full-page refetch needed.
+  const selectedDetail = selectedId ? getEmailDetail(selectedId) : undefined;
+  useEffect(() => {
+    if (!selectedDetail || selectedDetail.summarized === false) return;
+    setRows((prev) => prev.map((r) =>
+      r.emailId === selectedDetail.emailId && r.summarized === false
+        ? {
+            ...r,
+            summarized: true,
+            summary: selectedDetail.summary,
+            keyPoints: selectedDetail.keyPoints,
+            sentiment: selectedDetail.sentiment,
+            category: selectedDetail.category,
+            priority: selectedDetail.priority,
+            actionRequired: selectedDetail.actionRequired,
+            purpose: selectedDetail.purpose,
+            attachmentSummary: selectedDetail.attachmentSummary,
+          }
+        : r
+    ));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDetail?.emailId, selectedDetail?.summarized]);
 
   const handleStatusChange = useCallback((emailId: string, newStatus: EmailStatus) => {
     setRows((prev) => prev.map((r) => (r.emailId === emailId ? { ...r, status: newStatus } : r)));
@@ -509,15 +540,21 @@ export default function InboxView() {
                     <span className="text-xs text-gray-400 flex-shrink-0">{formatFull(selectedEmail.date)}</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${CATEGORY_BADGE[selectedEmail.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
-                      {selectedEmail.category}
-                    </span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${PRIORITY_BADGE[selectedEmail.priority]}`}>
-                      {selectedEmail.priority}
-                    </span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset capitalize ${SENTIMENT_STYLE[selectedEmail.sentiment]}`}>
-                      {selectedEmail.sentiment}
-                    </span>
+                    {/* AI-derived badges are hidden until the email is summarized —
+                        otherwise a pending email would flash placeholder values. */}
+                    {selectedEmail.summarized !== false && (
+                      <>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${CATEGORY_BADGE[selectedEmail.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
+                          {selectedEmail.category}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${PRIORITY_BADGE[selectedEmail.priority]}`}>
+                          {selectedEmail.priority}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset capitalize ${SENTIMENT_STYLE[selectedEmail.sentiment]}`}>
+                          {selectedEmail.sentiment}
+                        </span>
+                      </>
+                    )}
                     {selectedEmail.actionRequired === "Yes" && (
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset bg-red-50 text-red-600 ring-red-200">
                         Action Required
@@ -557,7 +594,24 @@ export default function InboxView() {
 
             <div className="flex-1 overflow-y-auto">
               <div className="px-5 py-5 space-y-5">
-                {detailTab === "summary" && <EmailInsightsPanel email={selectedEmail} />}
+                {detailTab === "summary" && (
+                  selectedEmail.summarized === false ? (
+                    loadingDetailId === selectedEmail.emailId ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                        <p className="text-sm">Generating AI summary…</p>
+                        <p className="text-xs text-gray-300 mt-1">Emails are summarized the first time you open them.</p>
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 text-gray-400">
+                        <p className="text-sm">No AI summary yet.</p>
+                        <p className="text-xs text-gray-300 mt-1">Use “Re-process AI” above to generate one.</p>
+                      </div>
+                    )
+                  ) : (
+                    <EmailInsightsPanel email={selectedEmail} />
+                  )
+                )}
 
                 {detailTab === "email" && (
                   <>
