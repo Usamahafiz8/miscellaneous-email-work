@@ -1,6 +1,6 @@
 import Imap from "imap";
 import { simpleParser } from "mailparser";
-import { randomUUID } from "crypto";
+import { createHash } from "crypto";
 import type { IMAPConfig, EmailMessage, EmailAttachment } from "./types";
 import { sanitizeHtml } from "./validation";
 
@@ -102,9 +102,8 @@ export async function fetchEmails(
 
         const pendingMessages: Promise<void>[] = [];
 
-        fetcher.on("message", (msg, seqno) => {
+        fetcher.on("message", (msg) => {
           const chunks: Buffer[] = [];
-          const messageId = randomUUID();
 
           const pending = new Promise<void>((res) => {
             msg.on("body", (stream: NodeJS.ReadableStream) => {
@@ -147,8 +146,19 @@ export async function fetchEmails(
                   totalSize += size;
                 }
 
+                // Stable, mailbox-unique id so a re-sync recognizes mail it has
+                // already stored (dedup is keyed on this). The RFC 5322 Message-ID
+                // header is globally unique and stable per message; fall back to a
+                // deterministic hash of the envelope for the rare message without
+                // one. Never random — a random id looks "new" on every fetch and
+                // piles up duplicate rows.
+                const stableId = parsed.messageId?.trim()
+                  || "hash-" + createHash("sha1")
+                       .update(`${fromAddress}|${subject}|${parsed.date?.toISOString() ?? ""}`)
+                       .digest("hex");
+
                 messages.push({
-                  id: `${messageId}-${seqno}`,
+                  id: stableId,
                   from: fromAddress,
                   subject,
                   date,
