@@ -35,6 +35,9 @@ interface DashboardContextValue {
   dismissError: () => void;
   syncEmails: () => Promise<void>;
   clearAndResync: () => Promise<void>;
+  // Pages through the ENTIRE mailbox (offset 0, 50, 100, …) storing every email,
+  // then summarizes — for a full backfill, not just the newest page.
+  fetchAllEmails: () => Promise<void>;
   // Bumped every time a sync batch lands — views depend on this to know when to refetch their page.
   syncVersion: number;
   // Home's recent-activity dataset (bounded, see OVERVIEW_PAGE_SIZE). Lazily
@@ -263,6 +266,53 @@ export default function DashboardProvider({
     }
   }, [refreshCounts, refreshOverview, summarizePending]);
 
+  // Fetch the WHOLE mailbox, not just the newest page: page through IMAP by
+  // advancing offset until every message has been scanned, storing new ones as
+  // raw rows, then summarize all pending. For an initial full import / backfill.
+  const fetchAllEmails = useCallback(async () => {
+    setIsSyncing(true);
+    setSyncMessage(null);
+    setError(null);
+    try {
+      let offset = 0;
+      let totalNew = 0;
+      let totalCount = 0;
+      // Safety cap: 1000 pages (server PAGE_SIZE 50 → up to 50k messages).
+      for (let i = 0; i < 1000; i++) {
+        const res = await fetch("/api/email/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset }),
+        });
+        if (redirectToLoginIfUnauthorized(res)) return;
+        const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+        if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to fetch emails");
+
+        totalNew += data.newCount ?? 0;
+        totalCount = data.totalCount ?? 0;
+        const fetched = data.fetched ?? 0;
+        offset += fetched;
+        setSyncVersion((v) => v + 1);
+        await Promise.all([refreshCounts(), refreshOverview()]);
+        setSyncMessage(`Importing all mail… ${Math.min(offset, totalCount)}/${totalCount} scanned, ${totalNew} new`);
+
+        if (fetched === 0 || offset >= totalCount) break;
+      }
+
+      setSyncMessage(`Imported ${totalNew} new email${totalNew === 1 ? "" : "s"} — summarizing…`);
+      const summarized = await summarizePending("Summarizing…");
+
+      setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      setSyncMessage(
+        `Imported all mail — ${totalNew} new email${totalNew === 1 ? "" : "s"}${summarized > 0 ? ` · ${summarized} summarized` : ""}`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [refreshCounts, refreshOverview, summarizePending]);
+
   // List rows omit body/htmlBody/attachments to keep page payloads light — fetch
   // the full content for one email the moment its detail pane is opened, caching
   // by emailId so re-opening the same row doesn't refetch.
@@ -336,11 +386,11 @@ export default function DashboardProvider({
 
   const contextValue = useMemo<DashboardContextValue>(() => ({
     counts, isSyncing, lastFetched, syncMessage, dismissSyncMessage, error, dismissError,
-    syncEmails, clearAndResync, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
+    syncEmails, clearAndResync, fetchAllEmails, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
     loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   }), [
     counts, isSyncing, lastFetched, syncMessage, dismissSyncMessage, error, dismissError,
-    syncEmails, clearAndResync, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
+    syncEmails, clearAndResync, fetchAllEmails, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
     loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   ]);
 

@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     const { emails, totalCount } = await fetchEmails(config, PAGE_SIZE, offset);
 
     if (emails.length === 0) {
-      return NextResponse.json({ success: true, summaries: [], emailCount: 0, newCount: 0, pendingCount: 0, totalCount, offset });
+      return NextResponse.json({ success: true, summaries: [], emailCount: 0, newCount: 0, fetched: 0, pendingCount: 0, totalCount, offset });
     }
 
     // Which of this page's emails aren't in the DB yet (within this account)
@@ -65,6 +65,9 @@ export async function POST(request: NextRequest) {
       summaries,
       emailCount: summaries.length,
       newCount,
+      // Number of messages this page actually pulled from IMAP — lets the client
+      // advance `offset` and know when it has paged through the whole mailbox.
+      fetched: emails.length,
       // No deferred AI work anymore — a single call fully syncs the page.
       pendingCount: 0,
       totalCount,
