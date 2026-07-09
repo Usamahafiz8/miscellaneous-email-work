@@ -162,54 +162,75 @@ export default function DashboardProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync from IMAP — runs AI only for emails not in DB yet. Loops until all new
-  // emails are summarized (server caps each call to stay under timeout).
+  // Summarize raw (pending) emails in bounded batches until none remain, refreshing
+  // views after each batch so the list fills in with real AI data progressively.
+  // Returns the total number summarized. Throws on a failed batch.
+  const summarizePending = useCallback(async (label: string): Promise<number> => {
+    let done = 0;
+    // Hard cap on iterations as an infinite-loop backstop (BATCH=10 server-side,
+    // so this covers thousands of emails) in case `remaining` never reaches 0.
+    for (let i = 0; i < 1000; i++) {
+      const res = await fetch("/api/email/summarize-pending", { method: "POST" });
+      if (redirectToLoginIfUnauthorized(res)) return done;
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to summarize pending emails");
+
+      done += data.summarized ?? 0;
+      setSyncVersion((v) => v + 1);
+      await Promise.all([refreshCounts(), refreshOverview()]);
+
+      if ((data.summarized ?? 0) === 0 || (data.remaining ?? 0) === 0) break;
+      setSyncMessage(`${label} ${done} summarized, ${data.remaining} remaining…`);
+    }
+    return done;
+  }, [refreshCounts, refreshOverview]);
+
+  // Sync from IMAP: fetch the newest mail as raw rows (fast, no AI), then
+  // summarize any pending emails (this fetch + any earlier backlog) in batches so
+  // the list fills in with real AI summaries instead of staying blank.
   const syncEmails = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
     setError(null);
-    let totalNew = 0;
     try {
-      let pendingCount = 1;
-      while (pendingCount > 0) {
-        const res = await fetch("/api/email/process", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ offset: 0 }),
-        });
-        if (redirectToLoginIfUnauthorized(res)) return;
-        const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-        if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
+      // Phase 1 — fetch & store raw (no LLM, returns immediately).
+      const res = await fetch("/api/email/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset: 0 }),
+      });
+      if (redirectToLoginIfUnauthorized(res)) return;
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
 
-        totalNew += data.newCount ?? 0;
-        pendingCount = data.pendingCount ?? 0;
-        setSyncVersion((v) => v + 1);
-        await Promise.all([refreshCounts(), refreshOverview()]);
+      const newCount = data.newCount ?? 0;
+      setSyncVersion((v) => v + 1);
+      await Promise.all([refreshCounts(), refreshOverview()]);
+      setSyncMessage(newCount > 0 ? `${newCount} new email${newCount === 1 ? "" : "s"} fetched — summarizing…` : "Summarizing pending emails…");
 
-        if (pendingCount > 0) {
-          setSyncMessage(`Summarized ${totalNew} emails so far, ${pendingCount} remaining…`);
-        }
-      }
+      // Phase 2 — summarize pending (newly fetched + any backlog).
+      const summarized = await summarizePending("Summarizing…");
 
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setSyncMessage(
-        totalNew > 0
-          ? `${totalNew} new email${totalNew === 1 ? "" : "s"} synced — summaries generate as you open them`
-          : "Already up to date — no new emails"
+        newCount > 0
+          ? `${newCount} new email${newCount === 1 ? "" : "s"} synced${summarized > 0 ? ` · ${summarized} summarized` : ""}`
+          : summarized > 0
+            ? `${summarized} email${summarized === 1 ? "" : "s"} summarized`
+            : "Already up to date — no new emails"
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setIsSyncing(false);
     }
-  }, [refreshCounts, refreshOverview]);
+  }, [refreshCounts, refreshOverview, summarizePending]);
 
-  // Clear DB then re-sync everything in batches (avoids 504 on large mailboxes)
+  // Clear DB then re-fetch the newest mail and re-summarize it from scratch.
   const clearAndResync = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
     setError(null);
-    let totalNew = 0;
     try {
       const del = await fetch("/api/summaries", { method: "DELETE" });
       if (redirectToLoginIfUnauthorized(del)) return;
@@ -217,35 +238,30 @@ export default function DashboardProvider({
       setSyncVersion((v) => v + 1);
       await Promise.all([refreshCounts(), refreshOverview()]);
 
-      let pendingCount = 1;
-      while (pendingCount > 0) {
-        const res = await fetch("/api/email/process", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ offset: 0 }),
-        });
-        if (redirectToLoginIfUnauthorized(res)) return;
-        const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-        if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
+      // Re-fetch newest mail as raw rows…
+      const res = await fetch("/api/email/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset: 0 }),
+      });
+      if (redirectToLoginIfUnauthorized(res)) return;
+      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
+      setSyncVersion((v) => v + 1);
+      await Promise.all([refreshCounts(), refreshOverview()]);
+      setSyncMessage("Re-fetching… summarizing emails…");
 
-        totalNew += data.newCount ?? 0;
-        pendingCount = data.pendingCount ?? 0;
-        setSyncVersion((v) => v + 1);
-        await Promise.all([refreshCounts(), refreshOverview()]);
-
-        if (pendingCount > 0) {
-          setSyncMessage(`Re-syncing… ${totalNew} done, ${pendingCount} remaining`);
-        }
-      }
+      // …then summarize them all.
+      const summarized = await summarizePending("Re-syncing…");
 
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      setSyncMessage(`Re-synced ${totalNew} email${totalNew !== 1 ? "s" : ""} with fresh AI summaries`);
+      setSyncMessage(`Re-synced ${summarized} email${summarized !== 1 ? "s" : ""} with fresh AI summaries`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setIsSyncing(false);
     }
-  }, [refreshCounts, refreshOverview]);
+  }, [refreshCounts, refreshOverview, summarizePending]);
 
   // List rows omit body/htmlBody/attachments to keep page payloads light — fetch
   // the full content for one email the moment its detail pane is opened, caching

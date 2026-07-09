@@ -191,6 +191,39 @@ export async function getDistinctSkills(account: string): Promise<string[]> {
   return rows.map((r) => r.skill);
 }
 
+// How many raw, not-yet-summarized emails this account has — drives the
+// "summarize pending" progress loop.
+export async function countPendingSummaries(account: string): Promise<number> {
+  return prisma.emailSummary.count({ where: { account, summarized: false } });
+}
+
+// Fetch up to `limit` pending (summarized=false) emails as EmailMessage-shaped
+// objects ready for summarizeEmails() — includes the stored body/attachments so
+// no IMAP round-trip is needed. Newest first, so the most relevant mail gets
+// summaries soonest.
+export async function getPendingEmails(
+  account: string,
+  limit: number,
+): Promise<Pick<EmailMessage, "id" | "from" | "subject" | "date" | "fullText" | "htmlBody" | "attachments">[]> {
+  const rows = await prisma.emailSummary.findMany({
+    where: { account, summarized: false },
+    orderBy: { date: "desc" },
+    take: limit,
+    select: { emailId: true, from: true, subject: true, date: true, body: true, htmlBody: true, attachments: true },
+  });
+  return rows.map((r) => ({
+    id: r.emailId,
+    from: r.from,
+    subject: r.subject,
+    date: r.date,
+    fullText: r.body ?? "",
+    htmlBody: r.htmlBody ?? undefined,
+    attachments: r.attachments
+      ? (() => { try { return JSON.parse(r.attachments!) as EmailAttachment[]; } catch { return undefined; } })()
+      : undefined,
+  }));
+}
+
 export async function getExistingEmailIds(ids: string[], account: string): Promise<Set<string>> {
   const rows = await prisma.emailSummary.findMany({
     where: { account, emailId: { in: ids } },
