@@ -1,8 +1,0 @@
-{
-  "functions": {
-    "app/api/email/fetch/route.ts": { "maxDuration": 60 },
-    "app/api/email/process/route.ts": { "maxDuration": 60 },
-    "app/api/email/summarize/route.ts": { "maxDuration": 60 },
-    "app/api/email/connect/route.ts": { "maxDuration": 30 }
-  }
-}

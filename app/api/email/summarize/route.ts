@@ -5,6 +5,10 @@ import { validateSummarizeRequest } from "@/lib/validation";
 import { currentAccount } from "@/lib/session";
 import type { SummarizeRequest } from "@/lib/types";
 
+// Batch LLM summarization — allow up to 5 minutes (was capped at 60s in
+// vercel.json, which this replaces). Vercel Pro; Hobby caps at 60s.
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   const account = currentAccount();
   if (!account) {

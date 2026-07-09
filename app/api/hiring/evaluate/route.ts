@@ -3,6 +3,10 @@ import { evaluateCandidate } from "@/lib/claude";
 import { currentAccount } from "@/lib/session";
 import type { HiringCriteria } from "@/lib/types";
 
+// One LLM call per candidate — routinely exceeds the platform default (~15s) and
+// 504s. Allow up to 5 minutes (Vercel Pro; Hobby caps at 60s).
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   if (!currentAccount()) {
     return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });

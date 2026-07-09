@@ -5,6 +5,11 @@ import { cacheSummaries } from "@/lib/cache";
 import { currentAccount } from "@/lib/session";
 import type { SummaryLength } from "@/lib/types";
 
+// Runs the LLM on one email — this is the lazy-summarization path hit the first
+// time any email is opened, so it must not 504 on the platform default (~15s).
+// Allow up to 5 minutes (Vercel Pro; Hobby caps at 60s).
+export const maxDuration = 300;
+
 // POST /api/email/resync
 // Re-runs AI summarization on a single already-cached email — no IMAP needed.
 // body: { emailId: string }

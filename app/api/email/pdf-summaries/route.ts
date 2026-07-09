@@ -5,6 +5,10 @@ import { summarizePdfAttachment } from "@/lib/claude";
 import { currentAccount } from "@/lib/session";
 import type { EmailAttachment } from "@/lib/types";
 
+// PDF text extraction + an LLM call per attachment across many emails — allow up
+// to 5 minutes so it doesn't 504. Vercel Pro; Hobby caps at 60s.
+export const maxDuration = 300;
+
 // POST /api/email/pdf-summaries
 // Reads existing emails from DB, extracts PDF text, generates attachmentSummary — no IMAP needed
 export async function POST() {
