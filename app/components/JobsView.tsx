@@ -374,8 +374,10 @@ export default function JobsView() {
 
   return (
     <div className="flex h-full overflow-hidden bg-white">
-      {/* ── Left pane: job list ─────────────────────────────────────────── */}
-      <div className="w-72 flex-shrink-0 border-r border-gray-200 flex flex-col overflow-hidden">
+      {/* ── Left pane: job list. Below md: the list and detail pane never share
+          the screen — selecting a job hides the list instead of squeezing both
+          into too little width. At md: and up this is unchanged. ── */}
+      <div className={`w-72 flex-shrink-0 border-r border-gray-200 flex-col overflow-hidden ${selectedJobId ? "hidden md:flex" : "flex"}`}>
         <div className="px-4 py-3.5 border-b border-gray-200 flex-shrink-0">
           <h1 className="text-base font-bold text-gray-900 mb-2.5">Jobs</h1>
           <div className="flex items-center gap-1.5">
@@ -443,7 +445,7 @@ export default function JobsView() {
       </div>
 
       {/* ── Right pane: selected job detail ─────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className={`flex-1 flex-col overflow-hidden ${selectedJobId ? "flex" : "hidden md:flex"}`}>
         {!selectedJob ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-1 text-center px-6">
             <p className="text-sm text-gray-500 font-medium">Select a job on the left, or create a new one to get started</p>

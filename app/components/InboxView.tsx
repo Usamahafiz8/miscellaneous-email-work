@@ -454,9 +454,12 @@ export default function InboxView() {
         </div>
       </div>
 
-      {/* ── Split view: narrower list column when an email is open, full-width otherwise ── */}
+      {/* ── Split view: narrower list column when an email is open, full-width otherwise.
+          Below md: the list and reading pane never share the screen — opening an
+          email hides the list entirely instead of squeezing both into too little
+          width. At md: and up this is unchanged (side-by-side split). ── */}
       <div className="flex-1 flex overflow-hidden">
-        <div className={`flex flex-col overflow-hidden ${selectedEmail ? "w-[420px] flex-shrink-0 border-r border-gray-200" : "flex-1"}`}>
+        <div className={`flex-col overflow-hidden ${selectedEmail ? "hidden md:flex md:w-[420px] md:flex-shrink-0 md:border-r md:border-gray-200" : "flex flex-1"}`}>
           <FilterBar
             search={searchInput}
             onSearchChange={setSearchInput}

@@ -623,9 +623,11 @@ export default function HiringView() {
         </div>
       </div>
 
-      {/* ── Split view: narrower list column when a candidate is open ──────── */}
+      {/* ── Split view: narrower list column when a candidate is open. Below md:
+          the list and reading pane never share the screen — see InboxView for
+          the same pattern. At md: and up this is unchanged. ── */}
       <div className="flex-1 flex overflow-hidden">
-        <div className={`flex flex-col overflow-hidden ${selectedEmail ? "w-[420px] flex-shrink-0 border-r border-gray-200" : "flex-1"}`}>
+        <div className={`flex-col overflow-hidden ${selectedEmail ? "hidden md:flex md:w-[420px] md:flex-shrink-0 md:border-r md:border-gray-200" : "flex flex-1"}`}>
           <DataTable
             variant="grid"
             columns={selectedEmail ? NARROW_HIRING_COLUMNS : FULL_HIRING_COLUMNS}
