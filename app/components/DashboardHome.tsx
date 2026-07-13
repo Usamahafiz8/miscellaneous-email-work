@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { EmailSummary, Priority, Category } from "@/lib/types";
 import DataTable from "./DataTable";
@@ -95,40 +96,60 @@ function StatCard({ label, value, sub, iconClass, icon }: StatCardProps) {
 
 export default function DashboardHome({ summaries, isLoading, lastFetched, onFetch }: DashboardHomeProps) {
   const router = useRouter();
-  const total = summaries.length;
-  const unread = summaries.filter(s => s.status === "New").length;
-  const openEmails = summaries.filter(s => s.status === "Open").length;
-  const closedEmails = summaries.filter(s => s.status === "Closed").length;
-  const actionRequired = summaries.filter(s => s.actionRequired === "Yes").length;
-  const hiring = summaries.filter(s => s.category === "Hiring").length;
-  const highPriority = summaries.filter(s => s.priority === "Critical" || s.priority === "High").length;
 
-  // Daily digest — today's slice
-  const todayEmails = summaries.filter(s => isToday(s.date));
-  const todayHiring = todayEmails.filter(s => s.category === "Hiring").length;
-  const todayAction = todayEmails.filter(s => s.actionRequired === "Yes").length;
-  const todayHighPriority = todayEmails.filter(s => s.priority === "Critical" || s.priority === "High").length;
-  const todayImportant = todayEmails.filter(s =>
-    s.priority === "Critical" || s.priority === "High" || s.actionRequired === "Yes"
-  );
-  const hasDigest = todayEmails.length > 0;
+  // Every stat/chart below is a pass over `summaries` (up to a few hundred rows).
+  // Cheap individually, but DashboardHome re-renders several times per sync
+  // (isLoading/isSyncing toggling) while `summaries` itself stays the same
+  // reference — memoizing keeps that from re-scanning the list on every one
+  // of those renders, only recomputing when the data actually changes.
+  const stats = useMemo(() => {
+    const total = summaries.length;
+    const unread = summaries.filter(s => s.status === "New").length;
+    const openEmails = summaries.filter(s => s.status === "Open").length;
+    const closedEmails = summaries.filter(s => s.status === "Closed").length;
+    const actionRequired = summaries.filter(s => s.actionRequired === "Yes").length;
+    const hiring = summaries.filter(s => s.category === "Hiring").length;
+    const highPriority = summaries.filter(s => s.priority === "Critical" || s.priority === "High").length;
 
-  const byCategory = summaries.reduce<Partial<Record<Category, number>>>((acc, s) => {
-    acc[s.category] = (acc[s.category] ?? 0) + 1; return acc;
-  }, {});
-  const sortedCategories = (Object.entries(byCategory) as [Category, number][]).sort((a, b) => b[1] - a[1]);
+    // Daily digest — today's slice
+    const todayEmails = summaries.filter(s => isToday(s.date));
+    const todayHiring = todayEmails.filter(s => s.category === "Hiring").length;
+    const todayAction = todayEmails.filter(s => s.actionRequired === "Yes").length;
+    const todayHighPriority = todayEmails.filter(s => s.priority === "Critical" || s.priority === "High").length;
+    const todayImportant = todayEmails.filter(s =>
+      s.priority === "Critical" || s.priority === "High" || s.actionRequired === "Yes"
+    );
+    const hasDigest = todayEmails.length > 0;
 
-  const byPriority = summaries.reduce<Partial<Record<Priority, number>>>((acc, s) => {
-    acc[s.priority] = (acc[s.priority] ?? 0) + 1; return acc;
-  }, {});
+    const byCategory = summaries.reduce<Partial<Record<Category, number>>>((acc, s) => {
+      acc[s.category] = (acc[s.category] ?? 0) + 1; return acc;
+    }, {});
+    const sortedCategories = (Object.entries(byCategory) as [Category, number][]).sort((a, b) => b[1] - a[1]);
 
-  const bySentiment = {
-    positive: summaries.filter(s => s.sentiment === "positive").length,
-    neutral: summaries.filter(s => s.sentiment === "neutral").length,
-    negative: summaries.filter(s => s.sentiment === "negative").length,
-  };
+    const byPriority = summaries.reduce<Partial<Record<Priority, number>>>((acc, s) => {
+      acc[s.priority] = (acc[s.priority] ?? 0) + 1; return acc;
+    }, {});
 
-  const recent = summaries.slice(0, 8);
+    const bySentiment = {
+      positive: summaries.filter(s => s.sentiment === "positive").length,
+      neutral: summaries.filter(s => s.sentiment === "neutral").length,
+      negative: summaries.filter(s => s.sentiment === "negative").length,
+    };
+
+    const recent = summaries.slice(0, 8);
+
+    return {
+      total, unread, openEmails, closedEmails, actionRequired, hiring, highPriority,
+      todayEmails, todayHiring, todayAction, todayHighPriority, todayImportant, hasDigest,
+      sortedCategories, byPriority, bySentiment, recent,
+    };
+  }, [summaries]);
+
+  const {
+    total, unread, openEmails, closedEmails, actionRequired, hiring, highPriority,
+    todayEmails, todayHiring, todayAction, todayHighPriority, todayImportant, hasDigest,
+    sortedCategories, byPriority, bySentiment, recent,
+  } = stats;
 
   // Gmail-style single-line row, matching Inbox/Hiring's list styling.
   function renderRecentRow(email: EmailSummary) {
