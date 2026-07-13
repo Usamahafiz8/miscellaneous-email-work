@@ -236,7 +236,7 @@ export default function DataTable<T>({
                     }`}
                   >
                     {selectable && (
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selectedIds?.has(id) ?? false}
@@ -246,7 +246,7 @@ export default function DataTable<T>({
                       </td>
                     )}
                     {(columns ?? []).map((col) => (
-                      <td key={col.key} className="px-4 py-3">
+                      <td key={col.key} className="px-4 py-3.5">
                         {col.render(row)}
                       </td>
                     ))}

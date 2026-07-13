@@ -23,6 +23,20 @@
   }
 }
 
+/* Respect the OS-level "reduce motion" preference — collapses every animation/
+   transition in the app (existing ones like animate-spin/animate-pulse and the
+   new ones added for this pass alike) to effectively instant, and turns off
+   smooth scrolling. This is a blanket rule so it automatically covers anything
+   added later too, not just what exists today. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @layer utilities {
   .line-clamp-2 {
     display: -webkit-box;
@@ -38,5 +52,16 @@
   }
   .animate-loading-bar {
     animation: loading-bar 1.1s ease-in-out infinite;
+  }
+
+  /* Reading-pane / detail-panel entrance — opacity + transform only (GPU-
+     friendly, no layout thrashing). Plays automatically whenever the element
+     it's applied to mounts, e.g. opening an email or candidate. */
+  @keyframes panel-in {
+    from { opacity: 0; transform: translateX(8px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .animate-panel-in {
+    animation: panel-in 180ms ease-out;
   }
 }

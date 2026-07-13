@@ -14,6 +14,7 @@ import PdfViewer from "./PdfViewer";
 import EmailInsightsPanel from "./EmailInsightsPanel";
 import LinkifiedText from "./LinkifiedText";
 import TagInput from "./TagInput";
+import DetailLoadingSkeleton from "./DetailLoadingSkeleton";
 
 interface EvalState {
   loading: boolean;
@@ -358,7 +359,7 @@ export default function HiringView() {
     },
     {
       key: "summary", header: "AI Summary", width: "260px",
-      render: (c) => <span className="block text-xs text-gray-500 whitespace-normal break-words py-1">{c.email.summary}</span>,
+      render: (c) => <span className="block text-xs text-gray-600 whitespace-normal break-words leading-relaxed py-1">{c.email.summary}</span>,
     },
     {
       key: "matchScore", header: "Match", width: "80px",
@@ -659,6 +660,7 @@ export default function HiringView() {
         {/* ── Reading pane (Gmail-style split, not an overlay) ─────────── */}
         {selectedEmail && (
           <DetailPanel
+            key={selectedEmail.emailId}
             email={selectedEmail}
             evalState={evaluations.get(selectedEmail.emailId) ?? null}
             detailTab={detailTab}
@@ -700,7 +702,7 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
     ? evaluated.candidateName : sender.name;
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-white">
+    <div className="flex-1 flex flex-col overflow-hidden bg-white animate-panel-in">
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 flex-shrink-0">
@@ -824,7 +826,7 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
                 email.htmlBody ? (
                   <div className="rounded-xl border border-gray-200 overflow-hidden">
                     <iframe srcDoc={email.htmlBody} sandbox="allow-popups allow-popups-to-escape-sandbox"
-                      className="w-full bg-white" style={{ height: "480px", border: "none" }} title="Email content" />
+                      className="w-full bg-white" style={{ height: "min(70vh, 800px)", border: "none" }} title="Email content" />
                   </div>
                 ) : (
                   <div className="bg-gray-50 rounded-xl p-5 border border-gray-200 max-h-96 overflow-y-auto">
@@ -835,13 +837,7 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
                   </div>
                 )
               ) : isLoadingDetail ? (
-                <div className="text-center py-12 text-gray-400">
-                  <svg className="w-6 h-6 mx-auto mb-2 animate-spin text-violet-400" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  <p className="text-sm">Loading email content…</p>
-                </div>
+                <DetailLoadingSkeleton message="Loading email content…" />
               ) : (
                 <div className="text-center py-12 text-gray-400">
                   <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">

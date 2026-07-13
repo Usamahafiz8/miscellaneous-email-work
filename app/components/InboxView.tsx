@@ -14,6 +14,7 @@ import PdfViewer from "./PdfViewer";
 import EmailInsightsPanel from "./EmailInsightsPanel";
 import LinkifiedText from "./LinkifiedText";
 import TagInput from "./TagInput";
+import DetailLoadingSkeleton from "./DetailLoadingSkeleton";
 
 const PRIORITY_DOT: Record<Priority, string> = {
   Critical: "bg-red-500", High: "bg-orange-400", Medium: "bg-yellow-400", Low: "bg-green-400",
@@ -80,7 +81,7 @@ const FULL_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
     key: "summary", header: "AI Summary", width: "280px",
     render: (r) => r.summarized === false
       ? <span className="block text-xs italic text-gray-400 py-1">Not summarized yet — open to generate</span>
-      : <span className="block text-xs text-gray-500 whitespace-normal break-words py-1">{r.summary}</span>,
+      : <span className="block text-xs text-gray-600 whitespace-normal break-words leading-relaxed py-1">{r.summary}</span>,
   },
   {
     key: "category", header: "Category", width: "120px",
@@ -515,7 +516,7 @@ export default function InboxView() {
 
         {/* ── Reading pane (Gmail-style split, not an overlay) ─────────── */}
         {selectedEmail && (
-          <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div key={selectedEmail.emailId} className="flex-1 flex flex-col overflow-hidden bg-white animate-panel-in">
             <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-white flex-shrink-0">
               <button onClick={() => router.push("/inbox")} aria-label="Close email" className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -627,11 +628,7 @@ export default function InboxView() {
                 {detailTab === "summary" && (
                   selectedEmail.summarized === false ? (
                     loadingDetailId === selectedEmail.emailId ? (
-                      <div className="text-center py-12 text-gray-400">
-                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                        <p className="text-sm">Generating AI summary…</p>
-                        <p className="text-xs text-gray-300 mt-1">Emails are summarized the first time you open them.</p>
-                      </div>
+                      <DetailLoadingSkeleton message="Generating AI summary… emails are summarized the first time you open them." />
                     ) : (
                       <div className="text-center py-12 text-gray-400">
                         <p className="text-sm">No AI summary yet.</p>
@@ -652,7 +649,7 @@ export default function InboxView() {
                             srcDoc={selectedEmail.htmlBody}
                             sandbox="allow-popups allow-popups-to-escape-sandbox"
                             className="w-full bg-white"
-                            style={{ height: "480px", border: "none" }}
+                            style={{ height: "min(70vh, 800px)", border: "none" }}
                             title="Email content"
                           />
                         </div>
@@ -665,13 +662,7 @@ export default function InboxView() {
                         </div>
                       )
                     ) : loadingDetailId === selectedEmail.emailId ? (
-                      <div className="text-center py-12 text-gray-400">
-                        <svg className="w-6 h-6 mx-auto mb-2 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <p className="text-sm">Loading email content…</p>
-                      </div>
+                      <DetailLoadingSkeleton message="Loading email content…" />
                     ) : (
                       <div className="text-center py-12 text-gray-400">
                         <svg className="w-8 h-8 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
