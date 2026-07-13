@@ -3,6 +3,9 @@
 export interface ColumnDef<T> {
   key: string;
   header: string;
+  // Plain-English explanation shown on hover — for columns whose meaning
+  // isn't obvious from the header alone (e.g. "Match", "Stage").
+  headerHint?: string;
   sortable?: boolean;
   width?: string;
   render: (row: T) => React.ReactNode;
@@ -130,7 +133,7 @@ export default function DataTable<T>({
       <div className={`${fillHeight ? "flex-1 overflow-auto" : ""} transition-opacity ${isLoading ? "opacity-50 pointer-events-none" : ""}`}>
         {rows.length === 0 ? (
           <div className="flex items-center justify-center py-16">
-            {emptyState ?? <p className="text-sm text-gray-400">No results</p>}
+            {emptyState ?? <p className="text-sm text-gray-400">Nothing to show here yet</p>}
           </div>
         ) : variant === "list" ? (
           <div className="divide-y divide-gray-100">
@@ -169,11 +172,12 @@ export default function DataTable<T>({
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 {selectable && (
-                  <th className="px-4 py-3 w-10">
+                  <th className="px-4 py-3 w-10" title="Select all rows on this page">
                     <input
                       type="checkbox"
                       checked={allSelected}
                       onChange={toggleAll}
+                      aria-label="Select all rows on this page"
                       className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                     />
                   </th>
@@ -182,6 +186,7 @@ export default function DataTable<T>({
                   <th
                     key={col.key}
                     style={{ width: col.width }}
+                    title={col.headerHint}
                     className={`px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${
                       col.sortable ? "cursor-pointer select-none hover:text-gray-700" : ""
                     }`}
@@ -189,6 +194,11 @@ export default function DataTable<T>({
                   >
                     <span className="inline-flex items-center gap-1">
                       {col.header}
+                      {col.headerHint && (
+                        <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      )}
                       {col.sortable && sort?.field === col.key && (
                         <svg
                           className={`w-3 h-3 transition-transform ${sort.order === "desc" ? "rotate-180" : ""}`}

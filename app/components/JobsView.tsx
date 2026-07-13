@@ -307,6 +307,7 @@ export default function JobsView() {
   const columns: ColumnDef<JobCandidateMatch>[] = useMemo(() => [
     {
       key: "matchScore", header: "Match %", width: "80px",
+      headerHint: "How well this candidate fits the requirements set above",
       render: (m) => {
         const color = m.matchScore >= 70 ? "bg-emerald-100 text-emerald-700" : m.matchScore >= 40 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600";
         return <span className={`text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${color}`}>{m.matchScore}%</span>;
@@ -362,6 +363,7 @@ export default function JobsView() {
     },
     {
       key: "recommendation", header: "Recommend", width: "100px",
+      headerHint: "AI's yes/no hiring recommendation based on the requirements",
       render: (m) => (
         <span className={`text-xs font-semibold whitespace-nowrap ${m.recommendation === "Yes" ? "text-emerald-600" : "text-red-500"}`}>
           {m.recommendation}
@@ -440,8 +442,9 @@ export default function JobsView() {
       {/* ── Right pane: selected job detail ─────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {!selectedJob ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-            Select or create a job posting
+          <div className="flex-1 flex flex-col items-center justify-center gap-1 text-center px-6">
+            <p className="text-sm text-gray-500 font-medium">Select a job on the left, or create a new one to get started</p>
+            <p className="text-xs text-gray-400">Paste in a job description and AI will pull out the requirements for you</p>
           </div>
         ) : (
           <>
@@ -476,6 +479,7 @@ export default function JobsView() {
               {/* JD section */}
               <div className="px-6 py-4 border-b border-gray-100">
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Job Description</label>
+                <p className="text-xs text-gray-400 mb-1.5">Paste the job ad or description below, then let AI fill in the requirements automatically.</p>
                 <textarea
                   rows={6}
                   value={jobDescriptionDraft}
@@ -487,10 +491,11 @@ export default function JobsView() {
                   <button
                     onClick={handleSaveAndExtract}
                     disabled={isExtracting || !jobDescriptionDraft.trim()}
+                    title="AI will read the description above and fill in the requirements below"
                     className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     {isExtracting && <Spinner />}
-                    Save & Extract Requirements
+                    {isExtracting ? "Reading description…" : "Save & Fill In Requirements"}
                   </button>
                   {extractError && (
                     <span className="text-xs text-amber-700 bg-amber-50 rounded-full px-2.5 py-1">{extractError}</span>
@@ -528,19 +533,21 @@ export default function JobsView() {
                   <div className="px-6 pb-5 pt-1 border-t border-gray-100 space-y-4">
                     <div className="grid grid-cols-2 gap-4 max-w-xs">
                       <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Min years</label>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Minimum Years Experience</label>
                         <input
                           type="number"
                           value={requirementsDraft.minExperienceYears}
+                          placeholder="e.g. 3"
                           onChange={(e) => setRequirementsDraft((d) => ({ ...d, minExperienceYears: e.target.value }))}
                           className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400"
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Max years</label>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Maximum Years Experience</label>
                         <input
                           type="number"
                           value={requirementsDraft.maxExperienceYears}
+                          placeholder="e.g. 8"
                           onChange={(e) => setRequirementsDraft((d) => ({ ...d, maxExperienceYears: e.target.value }))}
                           className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400"
                         />
@@ -548,7 +555,9 @@ export default function JobsView() {
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Tech Stack & Skills</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                        Tech Stack &amp; Skills <span className="text-gray-400 font-normal normal-case">(type one, press Enter)</span>
+                      </label>
                       <TagInput
                         value={requirementsDraft.techStack}
                         onChange={(v) => setRequirementsDraft((d) => ({ ...d, techStack: v }))}
@@ -609,11 +618,14 @@ export default function JobsView() {
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Other Criteria</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                        Other Criteria <span className="text-gray-400 font-normal normal-case">(optional)</span>
+                      </label>
                       <textarea
                         rows={2}
                         value={requirementsDraft.otherCriteria}
                         onChange={(e) => setRequirementsDraft((d) => ({ ...d, otherCriteria: e.target.value }))}
+                        placeholder="e.g. Must have led a team, willing to travel occasionally…"
                         className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 resize-y"
                       />
                     </div>
@@ -622,10 +634,11 @@ export default function JobsView() {
                       <button
                         onClick={handleSaveRequirements}
                         disabled={isSavingRequirements}
+                        title="Save these requirements so scanning candidates uses them"
                         className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
                         {isSavingRequirements && <Spinner />}
-                        Save Requirements
+                        {isSavingRequirements ? "Saving…" : "Save Requirements"}
                       </button>
                     </div>
                   </div>
@@ -637,11 +650,11 @@ export default function JobsView() {
                 <button
                   onClick={handleScan}
                   disabled={!hasCriteria || isScanning}
-                  title={hasCriteria ? "Scan all Hiring candidates against this job's requirements" : "Set requirements first"}
+                  title={hasCriteria ? "Compare every hiring candidate against this job's requirements" : "Set requirements above first"}
                   className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {isScanning && <Spinner />}
-                  Scan All Candidates
+                  {isScanning ? "Scanning…" : "Scan All Candidates"}
                 </button>
                 {isScanning && (
                   <span className="text-xs text-gray-400">This can take a few minutes for a large candidate pool…</span>
@@ -654,7 +667,9 @@ export default function JobsView() {
               </div>
 
               {/* Threshold picker */}
-              <div className="px-6 pt-3 flex items-center gap-1.5 flex-wrap">
+              <div className="px-6 pt-3">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Show matches of at least</p>
+                <div className="flex items-center gap-1.5 flex-wrap">
                 {THRESHOLD_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
@@ -666,6 +681,7 @@ export default function JobsView() {
                     {opt.label}
                   </button>
                 ))}
+                </div>
               </div>
 
               {/* Results */}
@@ -679,7 +695,9 @@ export default function JobsView() {
                   isLoading={isLoadingMatches}
                   fillHeight={false}
                   emptyState={
-                    <div className="text-center text-gray-400 py-12 text-sm">No candidates match this job yet — run a scan above.</div>
+                    <div className="text-center text-gray-400 py-12 text-sm">
+                      {hasCriteria ? "No matches yet — click “Scan All Candidates” above to compare candidates against this job." : "Add requirements above, then scan to see matching candidates here."}
+                    </div>
                   }
                 />
               </div>

@@ -84,6 +84,7 @@ const FULL_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
   },
   {
     key: "category", header: "Category", width: "120px",
+    headerHint: "What kind of email this is (Hiring, Sales, Support, etc.), decided by AI",
     render: (r) => r.summarized === false
       ? <span className="text-[10px] text-gray-300">—</span>
       : (
@@ -94,6 +95,7 @@ const FULL_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
   },
   {
     key: "priority", header: "Priority", width: "110px",
+    headerHint: "How urgent this email is, from Critical (most) to Low (least)",
     render: (r) => r.summarized === false
       ? <span className="text-[10px] text-gray-300">—</span>
       : (
@@ -105,12 +107,14 @@ const FULL_INBOX_COLUMNS: ColumnDef<EmailSummary>[] = [
   },
   {
     key: "actionRequired", header: "Action", width: "90px",
+    headerHint: "Does this email need a reply or task from you?",
     render: (r) => r.actionRequired === "Yes"
       ? <span className="text-red-500 text-xs whitespace-nowrap" title="Action required">⚡ Yes</span>
       : <span className="text-gray-300 text-xs">—</span>,
   },
   {
     key: "status", header: "Status", width: "110px",
+    headerHint: "New = unread, Open = you're working on it, Closed = done",
     render: (r) => (
       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_STYLE[r.status]}`}>
         {r.status}
@@ -259,11 +263,11 @@ export default function InboxView() {
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed");
       setPdfMessage(
         data.processed > 0
-          ? `PDF summaries generated for ${data.processed} of ${data.total} email${data.total !== 1 ? "s" : ""} — click Sync to refresh`
-          : "No PDF attachments found in cached emails"
+          ? `Summarized attachments for ${data.processed} of ${data.total} email${data.total !== 1 ? "s" : ""} — click Sync to see them`
+          : "No attachments found to summarize in your synced emails"
       );
     } catch (err) {
-      setPdfMessage(err instanceof Error ? err.message : "Failed to generate PDF summaries");
+      setPdfMessage(err instanceof Error ? err.message : "Couldn't summarize attachments — please try again");
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -397,7 +401,7 @@ export default function InboxView() {
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={generatePdfSummaries} disabled={isGeneratingPdf || isSyncing}
-            title="Generate AI summaries for PDF attachments in cached emails"
+            title="Read attached resumes/documents (PDFs) and summarize them with AI"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-700 text-sm font-medium transition-colors"
           >
             {isGeneratingPdf
@@ -406,30 +410,31 @@ export default function InboxView() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
             }
-            <span className="hidden sm:inline">{isGeneratingPdf ? "Generating…" : "PDF Summaries"}</span>
+            <span className="hidden sm:inline">{isGeneratingPdf ? "Reading attachments…" : "Summarize Attachments"}</span>
           </button>
           <button
             onClick={clearAndResync} disabled={isSyncing}
-            title="Clear all cached summaries and re-sync from scratch"
+            title="Erase all saved AI summaries and regenerate them from scratch — use this if the summaries look wrong"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 disabled:opacity-50 text-gray-600 text-sm font-medium transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            <span className="hidden sm:inline">Re-sync All</span>
+            <span className="hidden sm:inline">Rebuild All Summaries</span>
           </button>
           <button
             onClick={fetchAllEmails} disabled={isSyncing}
-            title="Page through the entire mailbox and import every email (full backfill)"
+            title="Go through your entire mailbox and import every email, not just the newest ones"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 text-indigo-700 text-sm font-medium transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H6a2 2 0 00-2 2z" />
             </svg>
-            <span className="hidden sm:inline">Fetch All</span>
+            <span className="hidden sm:inline">Import Entire Mailbox</span>
           </button>
           <button
             onClick={syncEmails} disabled={isSyncing}
+            title="Check for new emails since your last sync"
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
             {isSyncing
@@ -447,7 +452,7 @@ export default function InboxView() {
           <FilterBar
             search={searchInput}
             onSearchChange={setSearchInput}
-            searchPlaceholder="Search emails… (try from: subject:)"
+            searchPlaceholder="Search by sender, subject, or keyword…"
             filters={[
               { key: "category", label: "Category", options: CATEGORIES.map((c) => ({ value: c, label: c })), selected: category, onChange: setCategory },
               { key: "priority", label: "Priority", options: PRIORITIES.map((p) => ({ value: p, label: p })), selected: priority, onChange: setPriority },
@@ -485,10 +490,14 @@ export default function InboxView() {
                   <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
                   </svg>
-                  <p className="text-sm">{hasFilters ? "No emails match filters" : "No emails synced yet"}</p>
-                  {!hasFilters && (
+                  <p className="text-sm">{hasFilters ? "No emails match your filters" : "Your inbox is empty"}</p>
+                  {hasFilters ? (
+                    <button onClick={clearFilters} className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+                      Clear filters →
+                    </button>
+                  ) : (
                     <button onClick={syncEmails} className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
-                      Sync inbox →
+                      Sync now to fetch your emails →
                     </button>
                   )}
                 </div>
@@ -512,7 +521,7 @@ export default function InboxView() {
               <button
                 onClick={() => handleResyncEmail(selectedEmail.emailId)}
                 disabled={isResyncing}
-                title="Re-run AI summarization on this email"
+                title="Generate a fresh AI summary for this email — use this if the summary looks off"
                 className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 px-3 py-1.5 rounded-lg border border-indigo-200 hover:bg-indigo-50 disabled:opacity-50 transition-colors"
               >
                 {isResyncing
@@ -521,16 +530,20 @@ export default function InboxView() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                 }
-                Re-process AI
+                Refresh Summary
               </button>
 
-              <select
-                value={selectedEmail.status}
-                onChange={(e) => handleStatusChange(selectedEmail.emailId, e.target.value as EmailStatus)}
-                className="text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 text-gray-600"
-              >
-                {STATUSES.map((s) => <option key={s}>{s}</option>)}
-              </select>
+              <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                Status
+                <select
+                  value={selectedEmail.status}
+                  onChange={(e) => handleStatusChange(selectedEmail.emailId, e.target.value as EmailStatus)}
+                  title="New = unread, Open = you're working on it, Closed = done"
+                  className="text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 text-gray-600"
+                >
+                  {STATUSES.map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </label>
             </div>
 
             <div className="px-5 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
@@ -554,19 +567,19 @@ export default function InboxView() {
                         otherwise a pending email would flash placeholder values. */}
                     {selectedEmail.summarized !== false && (
                       <>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${CATEGORY_BADGE[selectedEmail.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
+                        <span title="What kind of email this is, decided by AI" className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${CATEGORY_BADGE[selectedEmail.category] ?? "bg-gray-100 text-gray-600 ring-gray-200"}`}>
                           {selectedEmail.category}
                         </span>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${PRIORITY_BADGE[selectedEmail.priority]}`}>
+                        <span title="How urgent this email is" className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset ${PRIORITY_BADGE[selectedEmail.priority]}`}>
                           {selectedEmail.priority}
                         </span>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset capitalize ${SENTIMENT_STYLE[selectedEmail.sentiment]}`}>
+                        <span title="The overall tone of this email" className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset capitalize ${SENTIMENT_STYLE[selectedEmail.sentiment]}`}>
                           {selectedEmail.sentiment}
                         </span>
                       </>
                     )}
                     {selectedEmail.actionRequired === "Yes" && (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset bg-red-50 text-red-600 ring-red-200">
+                      <span title="This email needs a reply or task from you" className="text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset bg-red-50 text-red-600 ring-red-200">
                         Action Required
                       </span>
                     )}
@@ -615,7 +628,7 @@ export default function InboxView() {
                     ) : (
                       <div className="text-center py-12 text-gray-400">
                         <p className="text-sm">No AI summary yet.</p>
-                        <p className="text-xs text-gray-300 mt-1">Use “Re-process AI” above to generate one.</p>
+                        <p className="text-xs text-gray-300 mt-1">Use “Refresh Summary” above to generate one.</p>
                       </div>
                     )
                   ) : (

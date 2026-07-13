@@ -350,6 +350,7 @@ export default function HiringView() {
     },
     {
       key: "matchScore", header: "Match", width: "80px",
+      headerHint: "How well this candidate fits the job criteria set below — click Evaluate to score",
       render: (c) => {
         const evalState = evaluations.get(c.email.emailId) ?? null;
         if (evalState?.loading) return <div className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />;
@@ -372,17 +373,20 @@ export default function HiringView() {
     },
     {
       key: "recommendation", header: "Recommend", width: "100px",
+      headerHint: "AI's yes/no hiring recommendation based on the job criteria",
       render: (c) => c.eval
         ? <span className={`text-xs font-semibold whitespace-nowrap ${c.eval.recommendation === "Yes" ? "text-emerald-600" : "text-red-500"}`}>{c.eval.recommendation}</span>
         : <span className="text-gray-300 text-xs">—</span>,
     },
     {
       key: "stage", header: "Stage", width: "130px",
+      headerHint: "Where this candidate is in your hiring process — click to move them",
       render: (c) => (
         <select
           value={c.email.stage}
           onChange={(e) => handleStageChange(c.email.emailId, e.target.value as Stage)}
           onClick={(e) => e.stopPropagation()}
+          title="Where this candidate is in your hiring process"
           className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ring-1 ring-inset border-none outline-none cursor-pointer ${STAGE_BADGE[c.email.stage]}`}
         >
           {STAGES.map((s) => <option key={s}>{s}</option>)}
@@ -453,6 +457,7 @@ export default function HiringView() {
             </button>
           )}
           <button onClick={syncEmails} disabled={isSyncing}
+            title="Check for new candidate emails since your last sync"
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
             {isSyncing
               ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -478,7 +483,7 @@ export default function HiringView() {
           )}
           <input
             value={searchInput} onChange={e => setSearchInput(e.target.value)}
-            placeholder="Search candidates… (try from: subject:)"
+            placeholder="Search by candidate name, subject, or email…"
             className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors"
           />
         </div>
@@ -513,7 +518,8 @@ export default function HiringView() {
         <input
           value={keywordsInput}
           onChange={(e) => setKeywordsInput(e.target.value)}
-          placeholder="Keywords (key points & skills)…"
+          placeholder="Any specific skill or keyword…"
+          title="Searches the AI-extracted key points and skills for this word"
           className="text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors w-48"
         />
 
@@ -575,19 +581,23 @@ export default function HiringView() {
         {criteriaOpen && (
           <div className="px-6 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-gray-100 pt-4">
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Position</label>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                Position <span className="text-gray-400 font-normal normal-case">(required)</span>
+              </label>
               <input value={criteria.position} onChange={(e) => setCriteria((c) => ({ ...c, position: e.target.value }))}
                 placeholder="e.g. Senior React Developer"
                 className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 bg-white" />
             </div>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
-                Must Have <span className="text-gray-400 font-normal normal-case">(Enter to add)</span>
+                Must Have <span className="text-gray-400 font-normal normal-case">(required — type one, press Enter)</span>
               </label>
               <TagInput value={criteria.mandatory} onChange={(v) => setCriteria((c) => ({ ...c, mandatory: v }))} placeholder="e.g. React, 5+ yrs" />
             </div>
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Nice to Have</label>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                Nice to Have <span className="text-gray-400 font-normal normal-case">(optional)</span>
+              </label>
               <TagInput value={criteria.optional} onChange={(v) => setCriteria((c) => ({ ...c, optional: v }))} placeholder="e.g. TypeScript" />
             </div>
           </div>
@@ -623,11 +633,11 @@ export default function HiringView() {
                 <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                <p className="text-sm">{hasFilters ? "No candidates match the current filters" : "No hiring emails found"}</p>
+                <p className="text-sm">{hasFilters ? "No candidates match your filters" : "No hiring emails yet"}</p>
                 {hasFilters ? (
                   <button onClick={clearFilters} className="text-sm font-medium text-violet-600 hover:text-violet-700">Clear filters →</button>
                 ) : (
-                  <button onClick={syncEmails} className="text-sm font-medium text-violet-600 hover:text-violet-700">Sync inbox →</button>
+                  <button onClick={syncEmails} className="text-sm font-medium text-violet-600 hover:text-violet-700">Sync now to fetch your emails →</button>
                 )}
               </div>
             }
@@ -688,13 +698,17 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
           </svg>
         </button>
         <div className="flex-1" />
-        <select
-          value={email.stage}
-          onChange={(e) => onStageChange(e.target.value as Stage)}
-          className="text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 text-gray-600"
-        >
-          {STAGES.map((s) => <option key={s}>{s}</option>)}
-        </select>
+        <label className="flex items-center gap-1.5 text-xs text-gray-400">
+          Stage
+          <select
+            value={email.stage}
+            onChange={(e) => onStageChange(e.target.value as Stage)}
+            title="Where this candidate is in your hiring process"
+            className="text-xs font-semibold rounded-lg px-2.5 py-1.5 border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 text-gray-600"
+          >
+            {STAGES.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </label>
         {!evalState ? (
           <button onClick={onEvaluate} disabled={!hasCriteria}
             title={hasCriteria ? "Evaluate against job criteria" : "Set job criteria first"}
@@ -732,21 +746,21 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
               <span className="text-xs text-gray-400 flex-shrink-0">{formatFull(email.date)}</span>
             </div>
             <div className="flex flex-wrap gap-1.5 mt-2">
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset
+              <span title="How urgent this application is" className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset
                 ${email.priority === "Critical" ? "bg-red-50 text-red-600 ring-red-200"
                   : email.priority === "High" ? "bg-orange-50 text-orange-600 ring-orange-200"
                   : email.priority === "Medium" ? "bg-yellow-50 text-yellow-700 ring-yellow-200"
                   : "bg-green-50 text-green-700 ring-green-200"}`}>
                 {email.priority}
               </span>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset capitalize
+              <span title="The overall tone of this email" className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset capitalize
                 ${email.sentiment === "positive" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
                   : email.sentiment === "negative" ? "bg-red-50 text-red-600 ring-red-200"
                   : "bg-gray-100 text-gray-600 ring-gray-200"}`}>
                 {email.sentiment}
               </span>
               {email.actionRequired === "Yes" && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset bg-red-50 text-red-600 ring-red-200">Action Required</span>
+                <span title="This candidate needs a reply or task from you" className="text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset bg-red-50 text-red-600 ring-red-200">Action Required</span>
               )}
               {(email.attachments?.length ?? 0) > 0 && (
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset bg-gray-100 text-gray-600 ring-gray-200">

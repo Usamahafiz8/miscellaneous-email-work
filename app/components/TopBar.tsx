@@ -11,25 +11,25 @@ interface TopBarProps {
   onLogout: () => void;
 }
 
-const NAV: { href: string; label: string; badge?: "unread" | "hiring"; icon: JSX.Element }[] = [
+const NAV: { href: string; label: string; hint: string; badge?: "unread" | "hiring"; icon: JSX.Element }[] = [
   {
-    href: "/", label: "Dashboard",
+    href: "/", label: "Dashboard", hint: "Overview of everything happening in your inbox",
     icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>,
   },
   {
-    href: "/inbox", label: "Inbox", badge: "unread",
+    href: "/inbox", label: "Inbox", hint: "All of your emails with AI-generated summaries", badge: "unread",
     icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>,
   },
   {
-    href: "/hiring", label: "Hiring", badge: "hiring",
+    href: "/hiring", label: "Hiring", hint: "Job applications and candidates, in one place", badge: "hiring",
     icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
   },
   {
-    href: "/jobs", label: "Jobs",
+    href: "/jobs", label: "Jobs", hint: "Manage job postings and match them to candidates",
     icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M20 7h-3V6a2 2 0 00-2-2H9a2 2 0 00-2 2v1H4a1 1 0 00-1 1v10a2 2 0 002 2h14a2 2 0 002-2V8a1 1 0 00-1-1zM9 6h6v1H9V6z" /></svg>,
   },
   {
-    href: "/candidates", label: "Candidate Sheet",
+    href: "/candidates", label: "Candidate Sheet", hint: "A spreadsheet-style view of every candidate's details",
     icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 17V7a2 2 0 012-2h6a2 2 0 012 2v10a2 2 0 01-2 2H9a2 2 0 01-2-2zM9 17H7a2 2 0 01-2-2V9m4 2h6m-6 4h6" /></svg>,
   },
 ];
@@ -61,8 +61,9 @@ export default function TopBar({ emailCount, unreadCount, hiringCount, accountEm
             <Link
               key={item.href}
               href={item.href}
+              title={item.hint}
               className={`flex items-center gap-2 rounded-lg text-sm font-medium px-3 py-2 whitespace-nowrap transition-colors
-                ${isActive ? "bg-indigo-500/10 text-indigo-300" : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.05]"}`}
+                ${isActive ? "bg-indigo-500/10 text-indigo-300 ring-1 ring-inset ring-indigo-500/20" : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.05]"}`}
             >
               <span className={isActive ? "text-indigo-400" : ""}>{item.icon}</span>
               <span>{item.label}</span>
@@ -82,7 +83,7 @@ export default function TopBar({ emailCount, unreadCount, hiringCount, accountEm
         <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 text-xs font-bold flex-shrink-0">
           {initial}
         </div>
-        <div className="hidden md:block min-w-0 max-w-[180px]">
+        <div className="hidden md:block min-w-0 max-w-[180px]" title={`${emailCount} emails have been fetched and summarized`}>
           <p className="text-slate-300 text-xs font-medium truncate">{accountEmail}</p>
           <p className="text-slate-600 text-[10px]">{emailCount} emails synced</p>
         </div>

@@ -159,12 +159,14 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
           <div>
             <h1 className="text-xl font-bold text-gray-900">{greeting}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
+              Here&rsquo;s what&rsquo;s happening in your inbox today ·{" "}
               {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-              {lastFetched && <span className="ml-3 text-gray-400">· Synced {lastFetched}</span>}
+              {lastFetched && <span className="ml-3 text-gray-400">· Last updated {lastFetched}</span>}
             </p>
           </div>
           <button
             onClick={onFetch} disabled={isLoading}
+            title="Check your mailbox for new emails and update this dashboard"
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
             {isLoading
@@ -285,7 +287,7 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
                 iconClass="bg-violet-50"
                 icon={<svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>}
               />
-              <StatCard label="High Priority" value={highPriority} sub="Critical + High"
+              <StatCard label="High Priority" value={highPriority} sub="Needs your attention soon"
                 iconClass="bg-red-50"
                 icon={<svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
               />
@@ -320,7 +322,8 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
 
               {/* Category breakdown */}
               <div className="bg-white rounded-2xl border border-gray-200 p-5">
-                <h2 className="font-semibold text-gray-900 text-sm mb-4">By Category</h2>
+                <h2 className="font-semibold text-gray-900 text-sm">By Category</h2>
+                <p className="text-xs text-gray-400 mb-4">What kind of emails you&rsquo;re receiving</p>
                 {sortedCategories.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-8">No data yet</p>
                 ) : (
@@ -359,7 +362,8 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
 
               {/* Priority distribution */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <h2 className="font-semibold text-gray-900 text-sm mb-4">Priority Distribution</h2>
+                <h2 className="font-semibold text-gray-900 text-sm">Priority Distribution</h2>
+                <p className="text-xs text-gray-400 mb-4">How urgent your emails are, from most to least</p>
                 <div className="space-y-3">
                   {(["Critical", "High", "Medium", "Low"] as Priority[]).map(priority => {
                     const count = byPriority[priority] ?? 0;
@@ -382,18 +386,24 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
               <div className="grid grid-cols-2 gap-4">
                 {/* Status donut */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col items-center gap-3">
-                  <h3 className="font-semibold text-gray-900 text-sm self-start">Status</h3>
+                  <div className="self-start">
+                    <h3 className="font-semibold text-gray-900 text-sm">Status</h3>
+                    <p className="text-[11px] text-gray-400">Green ring = share resolved</p>
+                  </div>
                   <DonutRing ratio={total > 0 ? closedEmails / total : 0} color="#10b981" size={80} />
                   <div className="space-y-1 w-full text-xs">
-                    <div className="flex justify-between"><span className="text-blue-600">New</span><span className="font-semibold">{unread}</span></div>
-                    <div className="flex justify-between"><span className="text-amber-600">Open</span><span className="font-semibold">{openEmails}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Closed</span><span className="font-semibold">{closedEmails}</span></div>
+                    <div className="flex justify-between"><span className="text-blue-600">New (unread)</span><span className="font-semibold">{unread}</span></div>
+                    <div className="flex justify-between"><span className="text-amber-600">Open (in progress)</span><span className="font-semibold">{openEmails}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Closed (resolved)</span><span className="font-semibold">{closedEmails}</span></div>
                   </div>
                 </div>
 
                 {/* Sentiment */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col gap-3">
-                  <h3 className="font-semibold text-gray-900 text-sm">Sentiment</h3>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 text-sm">Sentiment</h3>
+                    <p className="text-[11px] text-gray-400">The overall tone of your emails</p>
+                  </div>
                   <div className="flex-1 space-y-2.5 text-xs">
                     {[
                       { label: "Positive", val: bySentiment.positive, color: "bg-emerald-400", text: "text-emerald-600" },

@@ -79,7 +79,10 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1 className="text-white text-xl font-semibold">Sign in to MailAI</h1>
-          <p className="text-slate-400 text-sm mt-1">Use your PurelyMail email &amp; password</p>
+          <p className="text-slate-400 text-sm mt-1 text-center max-w-xs">
+            MailAI reads your inbox and summarizes what matters, so you don&rsquo;t have to open every email.
+          </p>
+          <p className="text-slate-500 text-xs mt-2">Use your PurelyMail email &amp; password to sign in</p>
         </div>
 
         {/* Card */}
@@ -118,7 +121,7 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Your IMAP password"
+                placeholder="Your email account password"
                 className="w-full rounded-lg border border-gray-200 px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-[#667eea]/30 focus:border-[#667eea]"
               />
               <button
@@ -196,8 +199,8 @@ export default function LoginPage() {
           </button>
 
           <p className="text-xs text-gray-400 text-center">
-            Your credentials are used only to connect to your mailbox over IMAP and are
-            stored encrypted in your session — never shared.
+            Your email and password are only used to connect to your own mailbox, and are
+            kept encrypted in your session — never shared with anyone else.
           </p>
         </form>
       </div>

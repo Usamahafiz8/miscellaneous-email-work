@@ -124,11 +124,13 @@ export default function CandidateSheetView() {
     },
     {
       key: "stage", header: "Stage", width: "130px",
+      headerHint: "Where this candidate is in your hiring process — click to move them",
       render: (r) => (
         <select
           value={r.stage}
           onChange={(e) => handleStageChange(r.emailId, e.target.value as Stage)}
           onClick={(e) => e.stopPropagation()}
+          title="Where this candidate is in your hiring process"
           className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ring-1 ring-inset border-none outline-none cursor-pointer ${STAGE_BADGE[r.stage]}`}
         >
           {STAGES.map((s) => <option key={s}>{s}</option>)}
@@ -174,7 +176,7 @@ export default function CandidateSheetView() {
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search candidates… (try from: subject:)"
+              placeholder="Search by candidate name, subject, or email…"
               className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors"
             />
           </div>
@@ -194,7 +196,8 @@ export default function CandidateSheetView() {
         <input
           value={keywordsInput}
           onChange={(e) => setKeywordsInput(e.target.value)}
-          placeholder="Keywords (key points & skills)…"
+          placeholder="Any specific skill or keyword…"
+          title="Searches the AI-extracted key points and skills for this word"
           className="text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors w-56"
         />
       </div>
@@ -214,6 +217,7 @@ export default function CandidateSheetView() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V7a2 2 0 012-2h6a2 2 0 012 2v10a2 2 0 01-2 2H9a2 2 0 01-2-2zM9 17H7a2 2 0 01-2-2V9m4 2h6m-6 4h6" />
               </svg>
               <p className="text-sm">No candidates found</p>
+              <p className="text-xs text-gray-300">Try clearing your search or skill filters, or sync your inbox for new applications</p>
             </div>
           }
         />

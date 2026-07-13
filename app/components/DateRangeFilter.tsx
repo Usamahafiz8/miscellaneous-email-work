@@ -22,7 +22,7 @@ function daysAgoLocal(n: number): string {
 }
 
 function formatLabel(from?: string, to?: string): string {
-  if (!from && !to) return "Date";
+  if (!from && !to) return "Date Range";
   const fmt = (s: string) => {
     const [y, m, d] = s.split("-").map(Number);
     return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
