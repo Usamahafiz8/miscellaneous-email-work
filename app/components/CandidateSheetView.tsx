@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { EmailSummary, Stage } from "@/lib/types";
 import { STAGES } from "@/lib/types";
 import { useDashboard } from "./DashboardProvider";
 import DataTable, { type ColumnDef, type DataTableSort } from "./DataTable";
 import MultiSelectFilter from "./MultiSelectFilter";
-
-const SHEET_PAGE_SIZE = 300; // unpaged in practice — see DashboardProvider's OVERVIEW_PAGE_SIZE precedent
 
 const STAGE_BADGE: Record<Stage, string> = {
   New: "bg-indigo-50 text-indigo-700 ring-indigo-200",
@@ -31,8 +29,10 @@ export default function CandidateSheetView() {
   const [rows, setRows] = useState<EmailSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-  // Client-side sort — correct here (unlike the paginated Inbox/Hiring views) since
-  // the whole matching dataset is already loaded in one shot, not paged in from the server.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  // Server-side sort now, same as Inbox/Hiring — each candidateName/candidateExperience/date
+  // sort field maps directly to a real EmailSummary column, same contract those views use.
   const [sort, setSort] = useState<DataTableSort>({ field: "date", order: "desc" });
 
   useEffect(() => {
@@ -45,49 +45,48 @@ export default function CandidateSheetView() {
     return () => clearTimeout(t);
   }, [keywordsInput]);
 
-  const fetchAll = useCallback(async () => {
+  // Any filter/search change resets to page 1 — otherwise you could land on
+  // an empty page of a filter that now only has fewer pages of results.
+  useEffect(() => { setPage(1); }, [debouncedSearch, skillFilter, debouncedKeywords, sort]);
+
+  // Guards against a slow, stale request (e.g. an earlier search term) resolving
+  // after a newer one and overwriting the current rows/total with old data —
+  // only the response matching the most-recently-issued request is applied.
+  const fetchRequestIdRef = useRef(0);
+
+  const fetchPage = useCallback(async () => {
+    const requestId = ++fetchRequestIdRef.current;
     setIsLoading(true);
     const params = new URLSearchParams();
-    params.set("page", "1");
-    params.set("pageSize", String(SHEET_PAGE_SIZE));
+    params.set("page", String(page));
+    params.set("pageSize", String(pageSize));
     params.append("category", "Hiring");
     if (debouncedSearch) params.set("search", debouncedSearch);
     skillFilter.forEach((s) => params.append("skill", s));
     if (debouncedKeywords) params.set("keywords", debouncedKeywords);
-    params.set("sortBy", "date");
-    params.set("sortOrder", "desc");
+    params.set("sortBy", sort.field);
+    params.set("sortOrder", sort.order);
     try {
       const res = await fetch(`/api/email/process?${params.toString()}`);
       const data = await res.json().catch(() => null);
+      if (requestId !== fetchRequestIdRef.current) return; // superseded by a newer request
       if (res.ok && data?.success) {
         setRows(data.summaries ?? []);
         setTotal(data.total ?? 0);
       }
     } finally {
-      setIsLoading(false);
+      if (requestId === fetchRequestIdRef.current) setIsLoading(false);
     }
-  }, [debouncedSearch, skillFilter, debouncedKeywords]);
+  }, [page, pageSize, debouncedSearch, skillFilter, debouncedKeywords, sort]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll, syncVersion]);
+  useEffect(() => { fetchPage(); }, [fetchPage, syncVersion]);
 
-  function handleStageChange(emailId: string, stage: Stage) {
+  const handleStageChange = useCallback((emailId: string, stage: Stage) => {
     setRows((prev) => prev.map((r) => (r.emailId === emailId ? { ...r, stage } : r)));
     patchEmail(emailId, { stage });
-  }
+  }, [patchEmail]);
 
-  const sortedRows = useMemo(() => {
-    const getValue = (r: EmailSummary): string => {
-      if (sort.field === "candidateName") return r.candidateName ?? "";
-      if (sort.field === "candidateExperience") return r.candidateExperience ?? "";
-      return r.date;
-    };
-    return [...rows].sort((a, b) => {
-      const cmp = getValue(a).localeCompare(getValue(b));
-      return sort.order === "asc" ? cmp : -cmp;
-    });
-  }, [rows, sort]);
-
-  const columns: ColumnDef<EmailSummary>[] = [
+  const columns: ColumnDef<EmailSummary>[] = useMemo(() => [
     {
       key: "candidateName", header: "Name", width: "160px", sortable: true,
       render: (r) => <span className="truncate block text-xs font-semibold text-gray-900">{r.candidateName ?? "—"}</span>,
@@ -150,7 +149,7 @@ export default function CandidateSheetView() {
           <span className="text-[10px] text-gray-300">—</span>
         ),
     },
-  ];
+  ], [handleStageChange]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">
@@ -205,11 +204,12 @@ export default function CandidateSheetView() {
       <div className="flex-1 overflow-hidden">
         <DataTable
           columns={columns}
-          rows={sortedRows}
+          rows={rows}
           rowKey={(r) => r.emailId}
           onRowClick={(r) => router.push(`/hiring/${encodeURIComponent(r.emailId)}`)}
           sort={sort}
           onSortChange={setSort}
+          pagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
           isLoading={isLoading}
           emptyState={
             <div className="flex flex-col items-center justify-center gap-3 text-gray-400">

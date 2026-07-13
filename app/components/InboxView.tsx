@@ -209,7 +209,13 @@ export default function InboxView() {
   // an empty page 4 of a filter that now only has 2 pages of results.
   useEffect(() => { setPage(1); }, [debouncedSearch, category, priority, status, actionRequired, dateFrom, dateTo, sort]);
 
+  // Guards against a slow, stale request (e.g. an earlier search term) resolving
+  // after a newer one and overwriting the current rows/total with old data —
+  // only the response matching the most-recently-issued request is applied.
+  const fetchRequestIdRef = useRef(0);
+
   const fetchPage = useCallback(async () => {
+    const requestId = ++fetchRequestIdRef.current;
     setIsLoading(true);
     const params = new URLSearchParams();
     params.set("page", String(page));
@@ -226,12 +232,13 @@ export default function InboxView() {
     try {
       const res = await fetch(`/api/email/process?${params.toString()}`);
       const data = await res.json().catch(() => null);
+      if (requestId !== fetchRequestIdRef.current) return; // superseded by a newer request
       if (res.ok && data?.success) {
         setRows(data.summaries ?? []);
         setTotal(data.total ?? 0);
       }
     } finally {
-      setIsLoading(false);
+      if (requestId === fetchRequestIdRef.current) setIsLoading(false);
     }
   }, [page, pageSize, debouncedSearch, category, priority, status, actionRequired, dateFrom, dateTo, sort]);
 

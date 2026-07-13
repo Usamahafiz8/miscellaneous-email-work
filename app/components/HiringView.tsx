@@ -129,7 +129,13 @@ export default function HiringView() {
 
   useEffect(() => { setPage(1); }, [debouncedSearch, stageFilter, tagFilter, statusFilter, dateFrom, dateTo, sort, skillFilter, debouncedKeywords]);
 
+  // Guards against a slow, stale request (e.g. an earlier search term) resolving
+  // after a newer one and overwriting the current rows/total with old data —
+  // only the response matching the most-recently-issued request is applied.
+  const fetchRequestIdRef = useRef(0);
+
   const fetchPage = useCallback(async () => {
+    const requestId = ++fetchRequestIdRef.current;
     setIsLoading(true);
     const params = new URLSearchParams();
     params.set("page", String(page));
@@ -148,12 +154,13 @@ export default function HiringView() {
     try {
       const res = await fetch(`/api/email/process?${params.toString()}`);
       const data = await res.json().catch(() => null);
+      if (requestId !== fetchRequestIdRef.current) return; // superseded by a newer request
       if (res.ok && data?.success) {
         setRows(data.summaries ?? []);
         setTotal(data.total ?? 0);
       }
     } finally {
-      setIsLoading(false);
+      if (requestId === fetchRequestIdRef.current) setIsLoading(false);
     }
   }, [page, pageSize, debouncedSearch, stageFilter, tagFilter, statusFilter, dateFrom, dateTo, sort, skillFilter, debouncedKeywords]);
 
@@ -229,7 +236,10 @@ export default function HiringView() {
     router.push(selectedId === email.emailId ? "/hiring" : `/hiring/${encodeURIComponent(email.emailId)}`);
   }
 
-  async function evaluate(email: EmailSummary) {
+  // useCallback (not a plain function) because it's read inside the memoized
+  // FULL_HIRING_COLUMNS below — needs a stable identity keyed to its real deps
+  // so that memo only recomputes when criteria/hasCriteria actually change.
+  const evaluate = useCallback(async (email: EmailSummary) => {
     if (!hasCriteria) return;
     setEvaluations((prev) => new Map(prev).set(email.emailId, { loading: true, result: null, error: null }));
     try {
@@ -247,7 +257,7 @@ export default function HiringView() {
         error: err instanceof Error ? err.message : "Failed",
       }));
     }
-  }
+  }, [hasCriteria, criteria]);
 
   async function evaluateAll() {
     if (!hasCriteria || rows.length === 0) return;
@@ -283,10 +293,12 @@ export default function HiringView() {
     patchEmail(emailId, { tags });
   }
 
-  function handleStageChange(emailId: string, stage: Stage) {
+  // useCallback for the same reason as `evaluate` above — read inside the
+  // memoized column definitions.
+  const handleStageChange = useCallback((emailId: string, stage: Stage) => {
     setRows((prev) => prev.map((r) => (r.emailId === emailId ? { ...r, stage } : r)));
     patchEmail(emailId, { stage });
-  }
+  }, [patchEmail]);
 
   async function bulkMoveStage(ids: string[], stage: Stage) {
     setRows((prev) => prev.map((r) => (ids.includes(r.emailId) ? { ...r, stage } : r)));
@@ -323,7 +335,7 @@ export default function HiringView() {
   // Tabular (spreadsheet) candidate grid: full column set when the list has the
   // whole width to itself, a narrow 3-column set once the split view opens and
   // the list shrinks to a 420px column.
-  const FULL_HIRING_COLUMNS: ColumnDef<Candidate>[] = [
+  const FULL_HIRING_COLUMNS: ColumnDef<Candidate>[] = useMemo(() => [
     {
       key: "date", header: "Date", sortable: true, width: "100px",
       render: (c) => <span className="text-xs text-gray-400 whitespace-nowrap">{formatRelative(c.email.date)}</span>,
@@ -403,9 +415,9 @@ export default function HiringView() {
         </div>
       ) : <span className="text-[10px] text-gray-300">—</span>,
     },
-  ];
+  ], [evaluations, hasCriteria, evaluate, handleStageChange]);
 
-  const NARROW_HIRING_COLUMNS: ColumnDef<Candidate>[] = [
+  const NARROW_HIRING_COLUMNS: ColumnDef<Candidate>[] = useMemo(() => [
     {
       key: "candidateName", header: "Candidate", width: "140px",
       render: (c) => (
@@ -424,7 +436,7 @@ export default function HiringView() {
         ? <span className="text-xs font-bold whitespace-nowrap">{c.eval.matchScore}%</span>
         : <span className="text-gray-300 text-xs">—</span>,
     },
-  ];
+  ], []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">

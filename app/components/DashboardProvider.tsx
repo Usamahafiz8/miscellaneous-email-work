@@ -158,6 +158,22 @@ export default function DashboardProvider({
     refreshOverview();
   }, [refreshOverview]);
 
+  // Large imports/backfills page through the mailbox in dozens of small batches
+  // (see summarizePending/pageThroughMailbox below), and used to refresh sidebar
+  // counts + the dashboard overview after every single one — for a 1,000-email
+  // import that's dozens of redundant round-trips. This throttles those refreshes
+  // to at most once every REFRESH_THROTTLE_MS, while `force` (used on the final
+  // batch) always goes through, so the UI still ends up fully accurate.
+  const REFRESH_THROTTLE_MS = 2000;
+  const lastRefreshAtRef = useRef(0);
+  const throttledRefresh = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastRefreshAtRef.current < REFRESH_THROTTLE_MS) return;
+    lastRefreshAtRef.current = now;
+    setSyncVersion((v) => v + 1);
+    await Promise.all([refreshCounts(), refreshOverview()]);
+  }, [refreshCounts, refreshOverview]);
+
   useEffect(() => {
     refreshCounts();
     refreshTags();
@@ -179,14 +195,14 @@ export default function DashboardProvider({
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to summarize pending emails");
 
       done += data.summarized ?? 0;
-      setSyncVersion((v) => v + 1);
-      await Promise.all([refreshCounts(), refreshOverview()]);
+      const isDone = (data.summarized ?? 0) === 0 || (data.remaining ?? 0) === 0;
+      await throttledRefresh(isDone); // force a real refresh on the final batch
 
-      if ((data.summarized ?? 0) === 0 || (data.remaining ?? 0) === 0) break;
+      if (isDone) break;
       setSyncMessage(`${label} ${done} summarized, ${data.remaining} remaining…`);
     }
     return done;
-  }, [refreshCounts, refreshOverview]);
+  }, [throttledRefresh]);
 
   // Sync from IMAP: fetch the newest mail as raw rows (fast, no AI), then
   // summarize any pending emails (this fetch + any earlier backlog) in batches so
@@ -250,14 +266,14 @@ export default function DashboardProvider({
       totalCount = data.totalCount ?? 0;
       const fetched = data.fetched ?? 0;
       offset += fetched;
-      setSyncVersion((v) => v + 1);
-      await Promise.all([refreshCounts(), refreshOverview()]);
+      const isDone = fetched === 0 || offset >= totalCount;
+      await throttledRefresh(isDone); // force a real refresh on the final batch
       setSyncMessage(`${label} ${Math.min(offset, totalCount)}/${totalCount} scanned, ${totalNew} new`);
 
-      if (fetched === 0 || offset >= totalCount) break;
+      if (isDone) break;
     }
     return totalNew;
-  }, [refreshCounts, refreshOverview]);
+  }, [throttledRefresh]);
 
   // Clear the DB, then re-import the WHOLE mailbox and re-summarize from scratch —
   // a clean full rebuild (also the way to purge legacy duplicate rows).
