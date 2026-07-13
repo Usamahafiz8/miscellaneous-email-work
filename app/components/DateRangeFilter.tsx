@@ -77,7 +77,7 @@ export default function DateRangeFilter({ dateFrom, dateTo, onApply }: DateRange
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 mt-1 w-64 bg-white rounded-lg border border-gray-200 shadow-lg z-20 py-2 px-3">
+        <div className="absolute left-0 mt-1 w-64 bg-white rounded-lg border border-gray-200 shadow-lg z-20 py-2 px-3 animate-dropdown-in">
           <div className="flex flex-col gap-1 mb-3">
             <button onClick={() => quickPick(todayLocal(), todayLocal())} className="text-left text-sm text-gray-700 hover:bg-gray-50 rounded px-2 py-1">Today</button>
             <button onClick={() => quickPick(daysAgoLocal(6), todayLocal())} className="text-left text-sm text-gray-700 hover:bg-gray-50 rounded px-2 py-1">Last 7 days</button>

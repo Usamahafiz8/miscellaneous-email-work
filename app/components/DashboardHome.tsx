@@ -83,7 +83,7 @@ interface StatCardProps {
 
 function StatCard({ label, value, sub, iconClass, icon }: StatCardProps) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-4">
+    <div className="bg-white rounded-2xl border border-gray-200 p-4 transition-shadow hover:shadow-sm">
       <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${iconClass}`}>
         {icon}
       </div>
@@ -188,7 +188,7 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
           <button
             onClick={onFetch} disabled={isLoading}
             title="Check your mailbox for new emails and update this dashboard"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition active:scale-[0.98]"
           >
             {isLoading
               ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -211,7 +211,7 @@ export default function DashboardHome({ summaries, isLoading, lastFetched, onFet
             </div>
             <h3 className="text-base font-semibold text-gray-800 mb-1">Your inbox is empty</h3>
             <p className="text-sm text-gray-500 mb-5">Click Fetch Emails to sync your inbox and generate AI summaries.</p>
-            <button onClick={onFetch} className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-colors">
+            <button onClick={onFetch} className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition active:scale-[0.98]">
               Fetch Emails
             </button>
           </div>

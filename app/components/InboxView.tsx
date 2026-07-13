@@ -389,7 +389,7 @@ export default function InboxView() {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">
       {pdfMessage && (
-        <div className="px-4 pt-3 flex-shrink-0">
+        <div className="px-4 pt-3 flex-shrink-0 animate-banner-in">
           <div className="flex items-center justify-between bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2">
             <span>{pdfMessage}</span>
             <button onClick={() => setPdfMessage(null)} aria-label="Dismiss" className="ml-4 text-amber-400 hover:text-amber-600">✕</button>
@@ -443,7 +443,7 @@ export default function InboxView() {
           <button
             onClick={syncEmails} disabled={isSyncing}
             title="Check for new emails since your last sync"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition active:scale-[0.98]"
           >
             {isSyncing
               ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />

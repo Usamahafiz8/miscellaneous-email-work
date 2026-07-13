@@ -389,7 +389,7 @@ export default function JobsView() {
             <button
               onClick={handleCreateJob}
               disabled={!newJobTitle.trim() || isCreatingJob}
-              className="flex-shrink-0 flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex-shrink-0 flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition active:scale-[0.98]"
             >
               {isCreatingJob && <Spinner className="w-3 h-3" />}
               + New
@@ -495,7 +495,7 @@ export default function JobsView() {
                     onClick={handleSaveAndExtract}
                     disabled={isExtracting || !jobDescriptionDraft.trim()}
                     title="AI will read the description above and fill in the requirements below"
-                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition active:scale-[0.98]"
                   >
                     {isExtracting && <Spinner />}
                     {isExtracting ? "Reading description…" : "Save & Fill In Requirements"}
@@ -532,7 +532,10 @@ export default function JobsView() {
                   </svg>
                 </button>
 
-                {requirementsOpen && (
+                {/* Always rendered (not conditionally mounted) so the grid-template-rows
+                    transition below can animate between 0fr/1fr. */}
+                <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${requirementsOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                  <div className="overflow-hidden min-h-0">
                   <div className="px-6 pb-5 pt-1 border-t border-gray-100 space-y-4">
                     <div className="grid grid-cols-2 gap-4 max-w-xs">
                       <div>
@@ -645,7 +648,8 @@ export default function JobsView() {
                       </button>
                     </div>
                   </div>
-                )}
+                  </div>
+                </div>
               </div>
 
               {/* Scan */}
@@ -654,7 +658,7 @@ export default function JobsView() {
                   onClick={handleScan}
                   disabled={!hasCriteria || isScanning}
                   title={hasCriteria ? "Compare every hiring candidate against this job's requirements" : "Set requirements above first"}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition active:scale-[0.98]"
                 >
                   {isScanning && <Spinner />}
                   {isScanning ? "Scanning…" : "Scan All Candidates"}

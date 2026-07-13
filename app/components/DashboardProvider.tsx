@@ -416,7 +416,7 @@ export default function DashboardProvider({
 
       {/* Sync feedback banner */}
       {syncMessage && (
-        <div className="px-6 pt-4 flex-shrink-0">
+        <div className="px-6 pt-4 flex-shrink-0 animate-banner-in">
           <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 text-indigo-700 text-sm rounded-lg px-4 py-2">
             <span>{syncMessage}</span>
             <button onClick={dismissSyncMessage} aria-label="Dismiss" className="ml-4 text-indigo-400 hover:text-indigo-600">✕</button>
@@ -426,7 +426,7 @@ export default function DashboardProvider({
 
       {/* Error banner */}
       {error && (
-        <div className="px-6 pt-4 flex-shrink-0">
+        <div className="px-6 pt-4 flex-shrink-0 animate-banner-in">
           <ErrorAlert message={error} onDismiss={dismissError} />
         </div>
       )}

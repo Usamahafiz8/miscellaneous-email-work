@@ -46,7 +46,7 @@ export default function FilterPresetsMenu<T>({ storageKey, currentFilters, onApp
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-64 bg-white rounded-lg border border-gray-200 shadow-lg z-20 py-1.5">
+        <div className="absolute right-0 mt-1 w-64 bg-white rounded-lg border border-gray-200 shadow-lg z-20 py-1.5 animate-dropdown-in">
           {presets.length === 0 ? (
             <p className="px-3 py-2 text-xs text-gray-400">No saved presets yet</p>
           ) : (

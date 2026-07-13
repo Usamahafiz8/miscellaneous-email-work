@@ -186,7 +186,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting || !email.trim() || !password}
-            className="w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity shadow-sm"
+            className="w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-[#667eea] to-[#764ba2] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition active:scale-[0.98] shadow-sm"
           >
             {isSubmitting ? (
               <>

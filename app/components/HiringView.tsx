@@ -471,7 +471,7 @@ export default function HiringView() {
           )}
           <button onClick={syncEmails} disabled={isSyncing}
             title="Check for new candidate emails since your last sync"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium transition active:scale-[0.98]">
             {isSyncing
               ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
@@ -591,30 +591,36 @@ export default function HiringView() {
           </svg>
         </button>
 
-        {criteriaOpen && (
-          <div className="px-6 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-gray-100 pt-4">
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
-                Position <span className="text-gray-400 font-normal normal-case">(required)</span>
-              </label>
-              <input value={criteria.position} onChange={(e) => setCriteria((c) => ({ ...c, position: e.target.value }))}
-                placeholder="e.g. Senior React Developer"
-                className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 bg-white" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
-                Must Have <span className="text-gray-400 font-normal normal-case">(required — type one, press Enter)</span>
-              </label>
-              <TagInput value={criteria.mandatory} onChange={(v) => setCriteria((c) => ({ ...c, mandatory: v }))} placeholder="e.g. React, 5+ yrs" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
-                Nice to Have <span className="text-gray-400 font-normal normal-case">(optional)</span>
-              </label>
-              <TagInput value={criteria.optional} onChange={(v) => setCriteria((c) => ({ ...c, optional: v }))} placeholder="e.g. TypeScript" />
+        {/* Always rendered (not conditionally mounted) so the grid-template-rows
+            transition below can animate between 0fr/1fr — an unmount/remount
+            would just pop the content in/out with no way to animate height
+            since "auto" isn't transitionable. */}
+        <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${criteriaOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+          <div className="overflow-hidden min-h-0">
+            <div className="px-6 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-gray-100 pt-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                  Position <span className="text-gray-400 font-normal normal-case">(required)</span>
+                </label>
+                <input value={criteria.position} onChange={(e) => setCriteria((c) => ({ ...c, position: e.target.value }))}
+                  placeholder="e.g. Senior React Developer"
+                  className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 bg-white" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                  Must Have <span className="text-gray-400 font-normal normal-case">(required — type one, press Enter)</span>
+                </label>
+                <TagInput value={criteria.mandatory} onChange={(v) => setCriteria((c) => ({ ...c, mandatory: v }))} placeholder="e.g. React, 5+ yrs" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+                  Nice to Have <span className="text-gray-400 font-normal normal-case">(optional)</span>
+                </label>
+                <TagInput value={criteria.optional} onChange={(v) => setCriteria((c) => ({ ...c, optional: v }))} placeholder="e.g. TypeScript" />
+              </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* ── Split view: narrower list column when a candidate is open ──────── */}
@@ -726,7 +732,7 @@ function DetailPanel({ email, evalState, detailTab, onTabChange, onClose, onEval
         {!evalState ? (
           <button onClick={onEvaluate} disabled={!hasCriteria}
             title={hasCriteria ? "Evaluate against job criteria" : "Set job criteria first"}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition active:scale-[0.98]">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>

@@ -47,7 +47,7 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 mt-1 w-56 bg-white rounded-lg border border-gray-200 shadow-lg z-20 py-1.5 max-h-72 overflow-y-auto">
+        <div className="absolute left-0 mt-1 w-56 bg-white rounded-lg border border-gray-200 shadow-lg z-20 py-1.5 max-h-72 overflow-y-auto animate-dropdown-in">
           {options.length === 0 ? (
             <p className="px-3 py-2 text-xs text-gray-400">No options</p>
           ) : (
