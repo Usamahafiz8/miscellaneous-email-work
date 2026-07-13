@@ -32,7 +32,7 @@ export default function TagInput({ value, onChange, placeholder, suggestions }: 
         {value.map((tag) => (
           <span key={tag} className="flex items-center gap-1 text-xs bg-violet-100 text-violet-700 rounded-full px-2.5 py-1 font-medium">
             {tag}
-            <button type="button" onClick={() => onChange(value.filter((t) => t !== tag))} className="hover:text-red-500 ml-0.5 leading-none">×</button>
+            <button type="button" onClick={() => onChange(value.filter((t) => t !== tag))} aria-label={`Remove tag ${tag}`} className="hover:text-red-500 ml-0.5 leading-none">×</button>
           </span>
         ))}
       </div>

@@ -13,7 +13,7 @@ export default function ErrorAlert({ message, onDismiss }: ErrorAlertProps) {
       </svg>
       <div className="flex-1 text-sm text-red-700">{message}</div>
       {onDismiss && (
-        <button onClick={onDismiss} className="text-red-400 hover:text-red-600 flex-shrink-0">
+        <button onClick={onDismiss} aria-label="Dismiss" className="text-red-400 hover:text-red-600 flex-shrink-0">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>

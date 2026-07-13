@@ -391,7 +391,7 @@ export default function InboxView() {
         <div className="px-4 pt-3 flex-shrink-0">
           <div className="flex items-center justify-between bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2">
             <span>{pdfMessage}</span>
-            <button onClick={() => setPdfMessage(null)} className="ml-4 text-amber-400 hover:text-amber-600">✕</button>
+            <button onClick={() => setPdfMessage(null)} aria-label="Dismiss" className="ml-4 text-amber-400 hover:text-amber-600">✕</button>
           </div>
         </div>
       )}
@@ -517,7 +517,7 @@ export default function InboxView() {
         {selectedEmail && (
           <div className="flex-1 flex flex-col overflow-hidden bg-white">
             <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-white flex-shrink-0">
-              <button onClick={() => router.push("/inbox")} className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors">
+              <button onClick={() => router.push("/inbox")} aria-label="Close email" className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>

@@ -145,6 +145,9 @@ export default function DataTable<T>({
                 <div
                   key={id}
                   onClick={() => onRowClick?.(row)}
+                  role={onRowClick ? "button" : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(row); } } : undefined}
                   className={`group flex items-center gap-3 px-4 py-2.5 transition-colors ${onRowClick ? "cursor-pointer" : ""} ${
                     selected ? "bg-indigo-50" : "bg-white hover:bg-gray-50"
                   }`}
@@ -225,6 +228,9 @@ export default function DataTable<T>({
                   <tr
                     key={id}
                     onClick={() => onRowClick?.(row)}
+                    role={onRowClick ? "button" : undefined}
+                    tabIndex={onRowClick ? 0 : undefined}
+                    onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(row); } } : undefined}
                     className={`transition-colors ${onRowClick ? "cursor-pointer" : ""} ${
                       selected ? "bg-indigo-50 border-l-2 border-l-indigo-500" : "bg-white hover:bg-gray-50"
                     }`}

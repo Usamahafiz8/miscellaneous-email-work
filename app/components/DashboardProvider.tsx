@@ -419,7 +419,7 @@ export default function DashboardProvider({
         <div className="px-6 pt-4 flex-shrink-0">
           <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 text-indigo-700 text-sm rounded-lg px-4 py-2">
             <span>{syncMessage}</span>
-            <button onClick={dismissSyncMessage} className="ml-4 text-indigo-400 hover:text-indigo-600">✕</button>
+            <button onClick={dismissSyncMessage} aria-label="Dismiss" className="ml-4 text-indigo-400 hover:text-indigo-600">✕</button>
           </div>
         </div>
       )}

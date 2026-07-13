@@ -7,6 +7,20 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* Keyboard-only focus ring for every button, link, and custom [role="button"]
+     row in the app. Applied globally by tag/role instead of per-component so
+     every interactive element gets it consistently — including ones that don't
+     currently have any focus styling at all (nav links, table rows, toolbar
+     buttons). :focus-visible only fires for keyboard/programmatic focus, not
+     mouse clicks, so it doesn't add a visible ring to normal pointer use. */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 @layer utilities {
