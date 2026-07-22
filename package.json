@@ -12,7 +12,6 @@
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^7.8.0",
     "@prisma/client": "^7.8.0",
-    "@types/ws": "^8.18.1",
     "imap": "^0.8.19",
     "mailparser": "^3.7.2",
     "next": "^14.2.0",
@@ -20,8 +19,7 @@
     "prisma": "^7.8.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "unpdf": "^1.6.2",
-    "ws": "^8.21.1"
+    "unpdf": "^1.6.2"
   },
   "devDependencies": {
     "@types/imap": "^0.8.40",
