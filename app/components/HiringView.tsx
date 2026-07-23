@@ -7,6 +7,7 @@ import { STAGES, STATUSES } from "@/lib/types";
 import { formatRelative, formatFull, parseSender, avatarGradient, isPresent, orDash } from "@/lib/utils";
 import { isTypingTarget, isGSequenceKey } from "@/lib/keyboard";
 import { useElementWidth } from "@/hooks/useElementWidth";
+import { usePersistentState } from "@/hooks/usePersistentState";
 import { useDashboard } from "./DashboardProvider";
 import DataTable, { type ColumnDef, type DataTableSort } from "./DataTable";
 import FilterBar from "./FilterBar";
@@ -222,6 +223,10 @@ export default function HiringView() {
   const handleListWidth = useCallback((w: number) => {
     setListTier(w >= 900 ? "full" : w >= 580 ? "medium" : "narrow");
   }, []);
+
+  // Lives here rather than in DetailPanel so it survives moving between
+  // candidates (the panel is keyed by emailId and remounts each time).
+  const [emailCollapsed, setEmailCollapsed] = usePersistentState("reader:hiringEmailCollapsed", false);
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -622,6 +627,11 @@ export default function HiringView() {
               {c.email.candidateSkills.length} skills
             </span>
           )}
+          {/* Which applications actually came with a résumé is the first thing
+              you want to know when triaging a list of them. */}
+          {(c.email.attachments?.length ?? 0) > 0 && (
+            <span className="flex-shrink-0 text-[9px] text-gray-400" title="Has a résumé attached">📎</span>
+          )}
         </div>
       </div>
     );
@@ -780,6 +790,8 @@ export default function HiringView() {
       onTagsChange={(tags) => handleTagsChange(selectedEmail.emailId, tags)}
       availableTags={availableTags}
       onStageChange={(stage) => handleStageChange(selectedEmail.emailId, stage)}
+      emailCollapsed={emailCollapsed}
+      onToggleEmail={setEmailCollapsed}
     />
   ) : null;
 
@@ -815,6 +827,11 @@ interface DetailPanelProps {
   onTagsChange: (tags: string[]) => void;
   availableTags: string[];
   onStageChange: (stage: Stage) => void;
+  // Whether the covering email is folded away so the résumé gets the full
+  // column. Owned by the view (not this panel) so the choice sticks as you move
+  // between candidates instead of resetting on every remount.
+  emailCollapsed: boolean;
+  onToggleEmail: (collapsed: boolean) => void;
 }
 
 // Above this pane width the AI insights and the original email lay out as two
@@ -893,6 +910,7 @@ function CandidateProfileCard({ email }: { email: EmailSummary }) {
 function DetailPanel({
   email, evalState, position, onPrev, onNext, detailTab, onTabChange, onClose,
   onEvaluate, hasCriteria, isLoadingDetail, onTagsChange, availableTags, onStageChange,
+  emailCollapsed, onToggleEmail,
 }: DetailPanelProps) {
   const sender = parseSender(email.from);
   const evaluated = evalState?.result ?? null;
@@ -911,13 +929,32 @@ function DetailPanel({
   );
 
   // With a résumé attached, the covering email is rarely the point — it's
-  // usually three lines of "please find attached". So the email gets a fixed
-  // slice and the résumé takes everything else, instead of the other way round.
+  // usually a forwarding note and a signature block. So the email gets a fixed
+  // slice and the résumé takes everything else, and the email can be collapsed
+  // away entirely to hand the résumé the full column.
+  const showBody = !hasAttachments || !emailCollapsed;
   const emailBlock = (
     <>
-      <div className={hasAttachments
-        ? "flex-shrink-0 h-[28%] min-h-[96px] flex flex-col pane-padx pt-2 pb-2"
-        : "flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3"}>
+      {hasAttachments && (
+        <button
+          type="button"
+          onClick={() => onToggleEmail(!emailCollapsed)}
+          aria-expanded={!emailCollapsed}
+          title={emailCollapsed ? "Show the covering email" : "Hide the covering email and give the résumé the full height"}
+          className="flex-shrink-0 flex items-center gap-1.5 pane-padx py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <svg className={`w-3 h-3 transition-transform ${emailCollapsed ? "-rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+          </svg>
+          Covering Email
+        </button>
+      )}
+
+      <div className={!showBody
+        ? "hidden"
+        : hasAttachments
+          ? "flex-shrink-0 h-[28%] min-h-[96px] flex flex-col pane-padx pb-2"
+          : "flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3"}>
         {(email.htmlBody || email.body) ? (
           email.htmlBody ? (
             <div className="flex-1 min-h-0 rounded-xl border border-gray-200 overflow-hidden">
@@ -942,7 +979,7 @@ function DetailPanel({
       </div>
 
       {hasAttachments && (
-        <div className="flex-1 min-h-0 flex flex-col border-t border-gray-100 pane-padx pt-2 pb-2">
+        <div className="flex-1 min-h-0 flex flex-col border-t border-gray-100 pane-padx pt-1.5 pb-2">
           <p className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
             {email.attachments!.length === 1 ? "Résumé / Attachment" : `Attachments (${email.attachments!.length})`}
           </p>

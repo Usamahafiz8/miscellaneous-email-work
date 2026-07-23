@@ -7,6 +7,7 @@ import { STATUSES, CATEGORIES, PRIORITIES } from "@/lib/types";
 import { formatRelative, formatFull, parseSender, avatarColor } from "@/lib/utils";
 import { isTypingTarget, isGSequenceKey } from "@/lib/keyboard";
 import { useElementWidth } from "@/hooks/useElementWidth";
+import { usePersistentState } from "@/hooks/usePersistentState";
 import { useDashboard } from "./DashboardProvider";
 import DataTable, { type ColumnDef, type DataTableSort } from "./DataTable";
 import FilterBar from "./FilterBar";
@@ -236,6 +237,10 @@ export default function InboxView() {
   const handleListWidth = useCallback((w: number) => {
     setListTier(w >= 880 ? "full" : w >= 560 ? "medium" : "narrow");
   }, []);
+
+  // Lives here rather than in ReadingPane so it survives moving between emails
+  // (the pane is keyed by emailId and remounts each time).
+  const [emailCollapsed, setEmailCollapsed] = usePersistentState("reader:inboxEmailCollapsed", false);
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -657,6 +662,8 @@ export default function InboxView() {
       onStatusChange={(s) => handleStatusChange(selectedEmail.emailId, s)}
       onTagsChange={(tags) => handleTagsChange(selectedEmail.emailId, tags)}
       availableTags={availableTags}
+      emailCollapsed={emailCollapsed}
+      onToggleEmail={setEmailCollapsed}
     />
   ) : null;
 
@@ -691,6 +698,11 @@ interface ReadingPaneProps {
   onStatusChange: (status: EmailStatus) => void;
   onTagsChange: (tags: string[]) => void;
   availableTags: string[];
+  // Whether the message body is folded away so the attachment gets the full
+  // column. Owned by the view so the choice sticks as you move between emails
+  // (this pane is keyed by emailId and remounts each time).
+  emailCollapsed: boolean;
+  onToggleEmail: (collapsed: boolean) => void;
 }
 
 // Above this pane width there's room to lay the AI insights and the original
@@ -701,6 +713,7 @@ const READER_TWO_COL_WIDTH = 940;
 function ReadingPane({
   email, position, onPrev, onNext, onClose, detailTab, onTabChange,
   onResync, isResyncing, isLoadingDetail, onStatusChange, onTagsChange, availableTags,
+  emailCollapsed, onToggleEmail,
 }: ReadingPaneProps) {
   const sender = parseSender(email.from);
   const hasAttachments = (email.attachments?.length ?? 0) > 0;
@@ -725,11 +738,30 @@ function ReadingPane({
   // When something is attached it's usually the point of the email, so the body
   // gets a fixed slice and the attachment takes the rest — rather than a short
   // note filling the pane while its PDF is squeezed into a strip at the bottom.
+  // The body can also be folded away entirely to hand the attachment everything.
+  const showBody = !hasAttachments || !emailCollapsed;
   const emailBlock = (
     <>
-      <div className={hasAttachments
-        ? "flex-shrink-0 h-[32%] min-h-[110px] flex flex-col pane-padx pt-2 pb-2"
-        : "flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3"}>
+      {hasAttachments && (
+        <button
+          type="button"
+          onClick={() => onToggleEmail(!emailCollapsed)}
+          aria-expanded={!emailCollapsed}
+          title={emailCollapsed ? "Show the email body" : "Hide the email body and give the attachment the full height"}
+          className="flex-shrink-0 flex items-center gap-1.5 pane-padx py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <svg className={`w-3 h-3 transition-transform ${emailCollapsed ? "-rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+          </svg>
+          Message
+        </button>
+      )}
+
+      <div className={!showBody
+        ? "hidden"
+        : hasAttachments
+          ? "flex-shrink-0 h-[32%] min-h-[110px] flex flex-col pane-padx pb-2"
+          : "flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3"}>
         {(email.htmlBody || email.body) ? (
           email.htmlBody ? (
             <div className="flex-1 min-h-0 rounded-xl border border-gray-200 overflow-hidden">
