@@ -22,6 +22,25 @@ export function formatFull(iso: string): string {
   } catch { return ""; }
 }
 
+// The AI fills fields it can't determine with placeholder strings ("Not
+// specified", "Unknown", "N/A", …) rather than leaving them null. Treat those
+// as absent so the UI can hide the row entirely instead of showing a column of
+// "Not specified" that just wastes space and adds noise.
+const ABSENT_VALUES = new Set([
+  "", "not specified", "unspecified", "not mentioned", "not provided",
+  "unknown", "n/a", "na", "none", "-", "—", "not available", "not applicable",
+]);
+export function isPresent(value: string | null | undefined): value is string {
+  return !!value && !ABSENT_VALUES.has(value.trim().toLowerCase());
+}
+
+// For table cells: the real value, or an em dash when it's missing/placeholder.
+// A single "—" reads as "no data" far more clearly than a cell full of the
+// words "Not specified".
+export function orDash(value: string | null | undefined): string {
+  return isPresent(value) ? value.trim() : "—";
+}
+
 export function parseSender(from: string): { name: string; email: string; initials: string } {
   const email = from.includes("<")
     ? from.slice(from.indexOf("<") + 1, from.lastIndexOf(">"))

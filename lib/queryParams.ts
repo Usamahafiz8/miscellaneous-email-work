@@ -1,7 +1,10 @@
 import { CATEGORIES, PRIORITIES, STATUSES, STAGES } from "./types";
 import type { EmailListQuery, Category, Priority, EmailStatus, ActionRequired, SortField, Stage } from "./types";
 
-const VALID_SORT_FIELDS: SortField[] = ["date", "priorityRank", "status", "category", "from", "subject"];
+const VALID_SORT_FIELDS: SortField[] = [
+  "date", "priorityRank", "status", "category", "from", "subject", "stage",
+  "candidateName", "candidateRole", "candidateExperience",
+];
 const VALID_ACTION_REQUIRED: ActionRequired[] = ["Yes", "No"];
 const MAX_TAGS_FILTER = 20; // defensive cap — tags are free text, can't be whitelisted like an enum
 

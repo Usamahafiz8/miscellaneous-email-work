@@ -182,7 +182,13 @@ export const STAGES: Stage[] = ["New", "Shortlisted", "Interviewing", "Offer", "
 
 // ─── Server-side list filtering/sorting/pagination ─────────────────────────
 
-export type SortField = "date" | "priorityRank" | "status" | "category" | "from" | "subject";
+// Every value here must be a real scalar column on EmailSummary — lib/cache.ts
+// feeds it straight to Prisma as `orderBy: { [sortBy]: sortOrder }`.
+// The candidate* fields back the Candidate Sheet's sortable columns, which
+// previously fell through the whitelist and silently didn't sort at all.
+export type SortField =
+  | "date" | "priorityRank" | "status" | "category" | "from" | "subject" | "stage"
+  | "candidateName" | "candidateRole" | "candidateExperience";
 export type SortOrder = "asc" | "desc";
 
 export interface EmailListQuery {

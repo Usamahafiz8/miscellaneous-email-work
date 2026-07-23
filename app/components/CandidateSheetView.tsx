@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { EmailSummary, Stage } from "@/lib/types";
 import { STAGES } from "@/lib/types";
+import { isTypingTarget, isGSequenceKey } from "@/lib/keyboard";
+import { orDash } from "@/lib/utils";
 import { useDashboard } from "./DashboardProvider";
 import DataTable, { type ColumnDef, type DataTableSort } from "./DataTable";
-import MultiSelectFilter from "./MultiSelectFilter";
+import FilterBar from "./FilterBar";
 
 const STAGE_BADGE: Record<Stage, string> = {
   New: "bg-indigo-50 text-indigo-700 ring-indigo-200",
@@ -24,16 +26,19 @@ export default function CandidateSheetView() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [skillFilter, setSkillFilter] = useState<string[]>([]);
+  const [stageFilter, setStageFilter] = useState<string[]>([]);
   const [keywordsInput, setKeywordsInput] = useState("");
   const [debouncedKeywords, setDebouncedKeywords] = useState("");
   const [rows, setRows] = useState<EmailSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-  // Server-side sort now, same as Inbox/Hiring — each candidateName/candidateExperience/date
-  // sort field maps directly to a real EmailSummary column, same contract those views use.
+  const [pageSize, setPageSize] = useState(50);
+  // Server-side sort, same as Inbox/Hiring — every sortable key below is a real
+  // EmailSummary column on the server's sort whitelist (lib/queryParams.ts).
   const [sort, setSort] = useState<DataTableSort>({ field: "date", order: "desc" });
+
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput), 300);
@@ -47,7 +52,7 @@ export default function CandidateSheetView() {
 
   // Any filter/search change resets to page 1 — otherwise you could land on
   // an empty page of a filter that now only has fewer pages of results.
-  useEffect(() => { setPage(1); }, [debouncedSearch, skillFilter, debouncedKeywords, sort]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, skillFilter, stageFilter, debouncedKeywords, sort]);
 
   // Guards against a slow, stale request (e.g. an earlier search term) resolving
   // after a newer one and overwriting the current rows/total with old data —
@@ -63,6 +68,7 @@ export default function CandidateSheetView() {
     params.append("category", "Hiring");
     if (debouncedSearch) params.set("search", debouncedSearch);
     skillFilter.forEach((s) => params.append("skill", s));
+    stageFilter.forEach((s) => params.append("stage", s));
     if (debouncedKeywords) params.set("keywords", debouncedKeywords);
     params.set("sortBy", sort.field);
     params.set("sortOrder", sort.order);
@@ -77,52 +83,87 @@ export default function CandidateSheetView() {
     } finally {
       if (requestId === fetchRequestIdRef.current) setIsLoading(false);
     }
-  }, [page, pageSize, debouncedSearch, skillFilter, debouncedKeywords, sort]);
+  }, [page, pageSize, debouncedSearch, skillFilter, stageFilter, debouncedKeywords, sort]);
 
   useEffect(() => { fetchPage(); }, [fetchPage, syncVersion]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) {
+        if (e.key === "Escape") (e.target as HTMLElement).blur();
+        return;
+      }
+      if (isGSequenceKey()) return;
+      if (e.key === "/") { e.preventDefault(); searchRef.current?.focus(); }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const handleStageChange = useCallback((emailId: string, stage: Stage) => {
     setRows((prev) => prev.map((r) => (r.emailId === emailId ? { ...r, stage } : r)));
     patchEmail(emailId, { stage });
   }, [patchEmail]);
 
+  function clearFilters() {
+    setSearchInput("");
+    setSkillFilter([]);
+    setStageFilter([]);
+    setKeywordsInput("");
+  }
+
+  const hasFilters = !!(debouncedSearch || skillFilter.length || stageFilter.length || debouncedKeywords);
+
   const columns: ColumnDef<EmailSummary>[] = useMemo(() => [
     {
-      key: "candidateName", header: "Name", width: "160px", sortable: true,
-      render: (r) => <span className="truncate block text-xs font-semibold text-gray-900">{r.candidateName ?? "—"}</span>,
+      key: "candidateName", header: "Name", width: "170px", sortable: true,
+      render: (r) => <span className="truncate block font-semibold text-gray-900">{orDash(r.candidateName)}</span>,
     },
     {
-      key: "candidateRole", header: "Current Role", width: "160px",
-      render: (r) => <span className="text-xs text-gray-700">{r.candidateRole ?? "—"}</span>,
+      key: "candidateRole", header: "Current Role", width: "170px", sortable: true,
+      render: (r) => <span className="truncate block text-gray-700">{orDash(r.candidateRole)}</span>,
     },
     {
-      key: "candidateExperience", header: "Experience", width: "130px",
-      render: (r) => <span className="truncate block text-xs text-gray-700">{r.candidateExperience ?? "—"}</span>,
+      key: "candidateExperience", header: "Experience", width: "130px", sortable: true,
+      render: (r) => <span className="truncate block text-gray-700">{orDash(r.candidateExperience)}</span>,
     },
     {
-      key: "candidateSkills", header: "Skills", width: "220px",
+      key: "candidateSkills", header: "Skills", width: "240px",
       render: (r) =>
         r.candidateSkills.length > 0 ? (
-          <div className="flex flex-wrap gap-1 max-w-[220px]">
+          <div className="flex flex-wrap gap-1">
             {r.candidateSkills.slice(0, 5).map((s) => (
               <span key={s} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-cyan-50 text-cyan-700 whitespace-nowrap">{s}</span>
             ))}
-            {r.candidateSkills.length > 5 && <span className="text-[10px] text-gray-400">+{r.candidateSkills.length - 5}</span>}
+            {r.candidateSkills.length > 5 && (
+              <span className="text-[10px] text-gray-400" title={r.candidateSkills.slice(5).join(", ")}>
+                +{r.candidateSkills.length - 5}
+              </span>
+            )}
           </div>
         ) : (
-          <span className="text-[10px] text-gray-300">—</span>
+          <span className="text-gray-300">—</span>
         ),
     },
     {
-      key: "candidateEducation", header: "Education", width: "180px",
-      render: (r) => <span className="text-xs text-gray-700 truncate max-w-[180px] block">{r.candidateEducation ?? "—"}</span>,
+      key: "candidateEducation", header: "Education", width: "190px",
+      render: (r) => <span className="truncate block text-gray-700" title={r.candidateEducation ?? undefined}>{orDash(r.candidateEducation)}</span>,
     },
     {
-      key: "candidateAchievements", header: "Key Achievements", width: "220px",
-      render: (r) => <span className="text-xs text-gray-600 truncate max-w-[220px] block">{r.candidateAchievements ?? "—"}</span>,
+      key: "candidateAchievements", header: "Key Achievements", width: "240px",
+      render: (r) => <span className="truncate block text-gray-600" title={r.candidateAchievements ?? undefined}>{orDash(r.candidateAchievements)}</span>,
     },
     {
-      key: "stage", header: "Stage", width: "130px",
+      key: "candidateLocation", header: "Location", width: "130px",
+      render: (r) => <span className="truncate block text-gray-700">{orDash(r.candidateLocation)}</span>,
+    },
+    {
+      key: "candidateNoticePeriod", header: "Notice", width: "110px",
+      render: (r) => <span className="truncate block text-gray-700">{orDash(r.candidateNoticePeriod)}</span>,
+    },
+    {
+      key: "stage", header: "Stage", width: "128px", sortable: true,
       headerHint: "Where this candidate is in your hiring process — click to move them",
       render: (r) => (
         <select
@@ -140,68 +181,60 @@ export default function CandidateSheetView() {
       key: "tags", header: "Tags", width: "160px",
       render: (r) =>
         r.tags.length > 0 ? (
-          <div className="flex flex-wrap gap-1 max-w-[160px]">
+          <div className="flex flex-wrap gap-1">
             {r.tags.map((t) => (
               <span key={t} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600 whitespace-nowrap">{t}</span>
             ))}
           </div>
         ) : (
-          <span className="text-[10px] text-gray-300">—</span>
+          <span className="text-gray-300">—</span>
         ),
     },
   ], [handleStageChange]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">
-      <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex-shrink-0 flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-base font-bold text-gray-900">Candidate Sheet</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {total} candidate{total !== 1 ? "s" : ""} — extracted resume data, one row per candidate
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-1 min-w-[180px] max-w-xs">
-          <div className="relative flex-1">
-            {searchInput.trim() !== "" && (searchInput !== debouncedSearch || isLoading) ? (
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-violet-400 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-            ) : (
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z" />
-              </svg>
-            )}
-            <input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search by candidate name, subject, or email…"
-              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors"
-            />
+      {/* One toolbar row instead of the old title strip + filter strip — the
+          sheet is a wide table, so every row of chrome removed is a row of
+          candidate data gained. */}
+      <FilterBar
+        accent="violet"
+        leading={
+          <div className="flex items-baseline gap-1.5 flex-shrink-0 mr-0.5">
+            <h1 className="text-sm font-bold text-gray-900">Candidate Sheet</h1>
+            <span className="text-[11px] text-gray-400 tabular-nums whitespace-nowrap">
+              {total.toLocaleString()} candidate{total !== 1 ? "s" : ""}
+            </span>
           </div>
-          {searchInput.trim() !== "" && (searchInput !== debouncedSearch || isLoading) && (
-            <span className="text-xs text-violet-500 font-medium animate-pulse flex-shrink-0">Searching…</span>
-          )}
-        </div>
-      </div>
+        }
+        search={searchInput}
+        onSearchChange={setSearchInput}
+        searchInputRef={searchRef}
+        searchPlaceholder="Search candidate, subject, email…  (/)"
+        filters={[
+          { key: "skills", label: "Skills", options: availableSkills.map((s) => ({ value: s, label: s })), selected: skillFilter, onChange: setSkillFilter },
+          { key: "stage", label: "Stage", options: STAGES.map((s) => ({ value: s, label: s })), selected: stageFilter, onChange: setStageFilter },
+        ]}
+        extraFilters={
+          <input
+            value={keywordsInput}
+            onChange={(e) => setKeywordsInput(e.target.value)}
+            placeholder="Keyword in resume…"
+            title="Searches the AI-extracted key points and skills for this word"
+            className="h-8 w-44 text-[13px] rounded-lg border border-gray-200 bg-white px-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors"
+          />
+        }
+        extraFiltersActive={!!debouncedKeywords}
+        onClearAll={clearFilters}
+        rightSlot={
+          <span className="text-[11px] text-gray-400 hidden lg:inline">
+            Extracted resume data · one row per candidate
+          </span>
+        }
+        isLoading={isLoading || searchInput !== debouncedSearch}
+      />
 
-      <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50/50 px-6 py-2.5 flex flex-wrap items-center gap-2">
-        <MultiSelectFilter
-          label="Skills"
-          options={availableSkills.map((s) => ({ value: s, label: s }))}
-          selected={skillFilter}
-          onChange={setSkillFilter}
-        />
-        <input
-          value={keywordsInput}
-          onChange={(e) => setKeywordsInput(e.target.value)}
-          placeholder="Any specific skill or keyword…"
-          title="Searches the AI-extracted key points and skills for this word"
-          className="text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-colors w-56"
-        />
-      </div>
-
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden min-h-0">
         <DataTable
           columns={columns}
           rows={rows}
@@ -217,7 +250,11 @@ export default function CandidateSheetView() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V7a2 2 0 012-2h6a2 2 0 012 2v10a2 2 0 01-2 2H9a2 2 0 01-2-2zM9 17H7a2 2 0 01-2-2V9m4 2h6m-6 4h6" />
               </svg>
               <p className="text-sm">No candidates found</p>
-              <p className="text-xs text-gray-300">Try clearing your search or skill filters, or sync your inbox for new applications</p>
+              {hasFilters ? (
+                <button onClick={clearFilters} className="text-sm font-medium text-violet-600 hover:text-violet-700">Clear filters →</button>
+              ) : (
+                <p className="text-xs text-gray-300">Sync your inbox to pull in new applications</p>
+              )}
             </div>
           }
         />

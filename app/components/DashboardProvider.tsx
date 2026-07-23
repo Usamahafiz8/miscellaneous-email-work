@@ -2,8 +2,9 @@
 
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { EmailSummary, EmailStatus, Stage } from "@/lib/types";
-import TopBar from "./TopBar";
-import ErrorAlert from "./ErrorAlert";
+import type { Toast, ToastKind } from "./ui/Toaster";
+import UIPrefsProvider from "./UIPrefsProvider";
+import AppChrome from "./AppChrome";
 
 // Bounded fetch backing Dashboard/Home's stat cards & charts. Not a true
 // full-dataset aggregate (that would need a dedicated GROUP BY endpoint) but
@@ -29,10 +30,13 @@ interface DashboardContextValue {
   counts: Counts;
   isSyncing: boolean;
   lastFetched: string | null;
-  syncMessage: string | null;
-  dismissSyncMessage: () => void;
-  error: string | null;
-  dismissError: () => void;
+  // Status messages render as a bottom-right toast stack (see AppChrome), not as
+  // inline banners — the old banners sat above the view and pushed every row
+  // down the moment a sync started, costing vertical space and shifting content
+  // mid-read. Views raise their own messages through `notify`.
+  toasts: Toast[];
+  notify: (message: string, kind?: ToastKind) => void;
+  dismissToast: (id: string) => void;
   syncEmails: () => Promise<void>;
   clearAndResync: () => Promise<void>;
   // Pages through the ENTIRE mailbox (offset 0, 50, 100, …) storing every email,
@@ -88,10 +92,45 @@ export default function DashboardProvider({
 }) {
   const [counts, setCounts] = useState<Counts>({ total: 0, unread: 0, hiring: 0, stageCounts: {} });
   const [isSyncing, setIsSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<string | null>(null);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncVersion, setSyncVersion] = useState(0);
+
+  // ── Toasts ────────────────────────────────────────────────────────────────
+  // Sync progress and errors reuse fixed ids ("sync"/"error") so a long import
+  // updates one toast in place ("120/900 scanned…") instead of stacking a new
+  // one per batch. Ad-hoc messages from views get a counter-based id.
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastSeq = useRef(0);
+
+  const upsertToast = useCallback((toast: Toast) => {
+    setToasts((prev) => {
+      const i = prev.findIndex((t) => t.id === toast.id);
+      if (i === -1) return [...prev, toast];
+      const next = [...prev];
+      next[i] = toast;
+      return next;
+    });
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const notify = useCallback((message: string, kind: ToastKind = "info") => {
+    upsertToast({ id: `n${++toastSeq.current}`, kind, message });
+  }, [upsertToast]);
+
+  // Sticky while work is in flight (a timed dismiss would hide the status
+  // halfway through a multi-minute import); auto-dismissing once it's done.
+  const setSyncMessage = useCallback((message: string | null, done = false) => {
+    if (message === null) { dismissToast("sync"); return; }
+    upsertToast({ id: "sync", kind: done ? "success" : "progress", message, sticky: !done });
+  }, [upsertToast, dismissToast]);
+
+  const setError = useCallback((message: string | null) => {
+    if (message === null) { dismissToast("error"); return; }
+    upsertToast({ id: "error", kind: "error", message });
+  }, [upsertToast, dismissToast]);
 
   const [overviewSummaries, setOverviewSummaries] = useState<EmailSummary[]>([]);
   const [isOverviewLoading, setIsOverviewLoading] = useState(false);
@@ -202,7 +241,7 @@ export default function DashboardProvider({
       setSyncMessage(`${label} ${done} summarized, ${data.remaining} remaining…`);
     }
     return done;
-  }, [throttledRefresh]);
+  }, [throttledRefresh, setSyncMessage]);
 
   // Sync from IMAP: fetch the newest mail as raw rows (fast, no AI), then
   // summarize any pending emails (this fetch + any earlier backlog) in batches so
@@ -236,14 +275,15 @@ export default function DashboardProvider({
           ? `${newCount} new email${newCount === 1 ? "" : "s"} synced${summarized > 0 ? ` · ${summarized} summarized` : ""}`
           : summarized > 0
             ? `${summarized} email${summarized === 1 ? "" : "s"} summarized`
-            : "Already up to date — no new emails"
+            : "Already up to date — no new emails",
+        true
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setIsSyncing(false);
     }
-  }, [refreshCounts, refreshOverview, summarizePending]);
+  }, [refreshCounts, refreshOverview, summarizePending, setSyncMessage, setError]);
 
   // Page through the ENTIRE mailbox (offset 0, 50, 100, …) storing every message
   // as a raw row. Returns total new emails stored. Shared by Fetch All & Re-sync.
@@ -273,7 +313,7 @@ export default function DashboardProvider({
       if (isDone) break;
     }
     return totalNew;
-  }, [throttledRefresh]);
+  }, [throttledRefresh, setSyncMessage]);
 
   // Clear the DB, then re-import the WHOLE mailbox and re-summarize from scratch —
   // a clean full rebuild (also the way to purge legacy duplicate rows).
@@ -293,13 +333,13 @@ export default function DashboardProvider({
       const summarized = await summarizePending("Re-syncing…");
 
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      setSyncMessage(`Re-synced ${summarized} email${summarized !== 1 ? "s" : ""} with fresh AI summaries`);
+      setSyncMessage(`Re-synced ${summarized} email${summarized !== 1 ? "s" : ""} with fresh AI summaries`, true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setIsSyncing(false);
     }
-  }, [refreshCounts, refreshOverview, pageThroughMailbox, summarizePending]);
+  }, [refreshCounts, refreshOverview, pageThroughMailbox, summarizePending, setSyncMessage, setError]);
 
   // Import the WHOLE mailbox (without clearing) and summarize all pending — for a
   // full backfill on top of whatever is already stored.
@@ -314,14 +354,15 @@ export default function DashboardProvider({
 
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setSyncMessage(
-        `Imported all mail — ${totalNew} new email${totalNew === 1 ? "" : "s"}${summarized > 0 ? ` · ${summarized} summarized` : ""}`
+        `Imported all mail — ${totalNew} new email${totalNew === 1 ? "" : "s"}${summarized > 0 ? ` · ${summarized} summarized` : ""}`,
+        true
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setIsSyncing(false);
     }
-  }, [pageThroughMailbox, summarizePending]);
+  }, [pageThroughMailbox, summarizePending, setSyncMessage, setError]);
 
   // List rows omit body/htmlBody/attachments to keep page payloads light — fetch
   // the full content for one email the moment its detail pane is opened, caching
@@ -391,52 +432,26 @@ export default function DashboardProvider({
     }
   }, [refreshCounts, refreshTags]);
 
-  const dismissSyncMessage = useCallback(() => setSyncMessage(null), []);
-  const dismissError = useCallback(() => setError(null), []);
-
   const contextValue = useMemo<DashboardContextValue>(() => ({
-    counts, isSyncing, lastFetched, syncMessage, dismissSyncMessage, error, dismissError,
+    counts, isSyncing, lastFetched, toasts, notify, dismissToast,
     syncEmails, clearAndResync, fetchAllEmails, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
     loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   }), [
-    counts, isSyncing, lastFetched, syncMessage, dismissSyncMessage, error, dismissError,
+    counts, isSyncing, lastFetched, toasts, notify, dismissToast,
     syncEmails, clearAndResync, fetchAllEmails, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
     loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   ]);
 
+  // AppChrome (top bar, command palette, shortcuts, toasts) renders *inside*
+  // the context provider so it can read sync state and run dashboard actions —
+  // the ⌘K palette offers "Sync inbox", "Import entire mailbox", and so on.
   return (
-    <div className="flex flex-col h-screen bg-white overflow-hidden font-sans">
-      <TopBar
-        emailCount={counts.total}
-        unreadCount={counts.unread}
-        hiringCount={counts.hiring}
-        accountEmail={accountEmail}
-        onLogout={logout}
-      />
-
-      {/* Sync feedback banner */}
-      {syncMessage && (
-        <div className="px-6 pt-4 flex-shrink-0 animate-banner-in">
-          <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 text-indigo-700 text-sm rounded-lg px-4 py-2">
-            <span>{syncMessage}</span>
-            <button onClick={dismissSyncMessage} aria-label="Dismiss" className="ml-4 text-indigo-400 hover:text-indigo-600">✕</button>
-          </div>
-        </div>
-      )}
-
-      {/* Error banner */}
-      {error && (
-        <div className="px-6 pt-4 flex-shrink-0 animate-banner-in">
-          <ErrorAlert message={error} onDismiss={dismissError} />
-        </div>
-      )}
-
-      {/* View */}
-      <div className="flex-1 overflow-hidden">
-        <DashboardContext.Provider value={contextValue}>
+    <UIPrefsProvider>
+      <DashboardContext.Provider value={contextValue}>
+        <AppChrome accountEmail={accountEmail} onLogout={logout}>
           {children}
-        </DashboardContext.Provider>
-      </div>
-    </div>
+        </AppChrome>
+      </DashboardContext.Provider>
+    </UIPrefsProvider>
   );
 }

@@ -8,6 +8,35 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* ── Density tokens ──────────────────────────────────────────────────────
+     Every table row, toolbar, and list item sizes itself from these variables
+     instead of hard-coded padding, so flipping data-density on the app root
+     (see UIPrefsProvider) restyles the whole app at once. "compact" is for
+     getting as many rows on screen as possible; "comfortable" is the default. */
+  :root {
+    --row-py: 0.75rem;      /* table cell vertical padding */
+    --row-px: 0.875rem;     /* table cell horizontal padding */
+    --row-text: 0.75rem;    /* table cell font size */
+    --head-py: 0.5rem;      /* table header vertical padding */
+    --bar-py: 0.5rem;       /* toolbar vertical padding */
+    --bar-px: 0.875rem;     /* toolbar horizontal padding */
+    --pane-px: 1.25rem;     /* reading-pane horizontal padding */
+    --gutter: 1.25rem;      /* dashboard page gutter */
+    --card-gap: 1rem;       /* dashboard grid gap */
+  }
+
+  [data-density="compact"] {
+    --row-py: 0.3125rem;
+    --row-px: 0.625rem;
+    --row-text: 0.6875rem;
+    --head-py: 0.3125rem;
+    --bar-py: 0.3125rem;
+    --bar-px: 0.625rem;
+    --pane-px: 0.875rem;
+    --gutter: 0.75rem;
+    --card-gap: 0.625rem;
+  }
+
   /* Keyboard-only focus ring for every button, link, and custom [role="button"]
      row in the app. Applied globally by tag/role instead of per-component so
      every interactive element gets it consistently — including ones that don't
@@ -20,6 +49,32 @@
     outline: 2px solid #6366f1;
     outline-offset: 2px;
     border-radius: 4px;
+  }
+
+  /* Slim scrollbars everywhere. The default macOS/Windows scrollbar eats 15px
+     of a 420px list column; this reclaims most of it while keeping the bar
+     visible enough to grab. Firefox uses the standard properties, WebKit the
+     ::-webkit- pseudo-elements — both are declared so neither browser falls
+     back to the chunky default. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
   }
 }
 
@@ -45,6 +100,20 @@
     overflow: hidden;
   }
 
+  /* Density-driven spacing utilities. Used by DataTable/toolbars so the
+     compact/comfortable switch is a single CSS variable change rather than a
+     class swap on dozens of elements. */
+  .row-pad   { padding: var(--row-py) var(--row-px); }
+  .head-pad  { padding: var(--head-py) var(--row-px); }
+  .bar-pad   { padding: var(--bar-py) var(--bar-px); }
+  .pane-padx { padding-left: var(--pane-px); padding-right: var(--pane-px); }
+  .row-text  { font-size: var(--row-text); }
+
+  /* Hides the scrollbar but keeps the element scrollable — for horizontal
+     toolbar/nav strips where a visible bar would just add noise. */
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
   @keyframes loading-bar {
     0% { transform: translateX(-100%); }
     50% { transform: translateX(10%); }
@@ -52,6 +121,19 @@
   }
   .animate-loading-bar {
     animation: loading-bar 1.1s ease-in-out infinite;
+  }
+
+  /* Skeleton placeholder shimmer — used for table rows and detail panes while
+     their data is in flight, instead of dimming already-rendered content. */
+  @keyframes skeleton-sweep {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .skeleton {
+    background-image: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+    background-size: 200% 100%;
+    animation: skeleton-sweep 1.4s ease-in-out infinite;
+    border-radius: 4px;
   }
 
   /* Reading-pane / detail-panel entrance — opacity + transform only (GPU-
@@ -86,5 +168,31 @@
   }
   .animate-banner-in {
     animation: banner-in 200ms ease-out;
+  }
+
+  /* Toasts stack in the bottom-right corner as an overlay, so status messages
+     no longer push the whole view down the way the old inline banners did. */
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(12px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .animate-toast-in {
+    animation: toast-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Command palette / shortcut sheet — scale up from slightly small and behind. */
+  @keyframes modal-in {
+    from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .animate-modal-in {
+    animation: modal-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes overlay-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .animate-overlay-in {
+    animation: overlay-in 140ms ease-out;
   }
 }

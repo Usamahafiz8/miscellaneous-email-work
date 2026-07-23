@@ -5,17 +5,40 @@ import type { EmailAttachment } from "@/lib/types";
 
 export default function PdfViewer({ attachment }: { attachment: EmailAttachment }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const prevUrl = useRef<string | null>(null);
 
   useEffect(() => {
     if (prevUrl.current) URL.revokeObjectURL(prevUrl.current);
-    const bytes = Uint8Array.from(atob(attachment.data), c => c.charCodeAt(0));
-    const blob = new Blob([bytes], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    setBlobUrl(url);
-    prevUrl.current = url;
-    return () => URL.revokeObjectURL(url);
+    // A malformed/empty base64 blob makes atob throw. That must not take the
+    // whole reading pane down with it — the pane renders the email body and
+    // its attachments together now, so one bad attachment would blank the
+    // insights too. Degrade to a "couldn't load" card instead.
+    try {
+      const bytes = Uint8Array.from(atob(attachment.data ?? ""), c => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      setBlobUrl(url);
+      setFailed(false);
+      prevUrl.current = url;
+      return () => URL.revokeObjectURL(url);
+    } catch {
+      setBlobUrl(null);
+      setFailed(true);
+    }
   }, [attachment.data]);
+
+  if (failed) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+        <svg className="w-4 h-4 text-gray-400 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5z" />
+        </svg>
+        <span className="text-xs text-gray-600 truncate">{attachment.filename}</span>
+        <span className="text-[10px] text-gray-400 ml-auto flex-shrink-0">Couldn&rsquo;t load preview</span>
+      </div>
+    );
+  }
 
   if (!blobUrl) return null;
 

@@ -36,14 +36,26 @@ export default function FilterPresetsMenu<T>({ storageKey, currentFilters, onApp
 
   return (
     <div className="relative" ref={ref}>
+      {/* Icon-only trigger. Saved filter sets are useful but rarely clicked —
+          as a 32px bookmark button it costs a fraction of the toolbar width the
+          old "Presets (2) ▾" text button did. */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-300 px-3 py-2 transition-colors whitespace-nowrap"
+        aria-expanded={open}
+        aria-label={`Saved filter presets${presets.length > 0 ? ` (${presets.length})` : ""}`}
+        title="Save the current filters, or reapply a saved set"
+        className={`relative flex items-center justify-center w-8 h-8 rounded-lg border transition-colors ${
+          open ? "border-gray-300 bg-gray-100 text-gray-700" : "border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+        }`}
       >
-        Presets{presets.length > 0 ? ` (${presets.length})` : ""}
-        <svg className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
         </svg>
+        {presets.length > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center">
+            {presets.length}
+          </span>
+        )}
       </button>
       {open && (
         <div className="absolute right-0 mt-1 w-64 bg-white rounded-lg border border-gray-200 shadow-lg z-20 py-1.5 animate-dropdown-in">

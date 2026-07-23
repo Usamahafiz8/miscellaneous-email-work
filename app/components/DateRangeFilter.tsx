@@ -6,7 +6,14 @@ interface DateRangeFilterProps {
   dateFrom?: string;
   dateTo?: string;
   onApply: (dateFrom?: string, dateTo?: string) => void;
+  // Matches the host view's accent so the toolbar reads as one control strip.
+  accent?: "indigo" | "violet";
 }
+
+const ACCENT = {
+  indigo: { active: "border-indigo-300 bg-indigo-50 text-indigo-700", btn: "bg-indigo-600 hover:bg-indigo-700", ring: "focus:ring-indigo-300 focus:border-indigo-400" },
+  violet: { active: "border-violet-300 bg-violet-50 text-violet-700", btn: "bg-violet-600 hover:bg-violet-700", ring: "focus:ring-violet-300 focus:border-violet-400" },
+};
 
 // Local calendar day, not toISOString().slice(0,10) — the latter is UTC-based
 // and would shift "Today" to the wrong day depending on the operator's offset.
@@ -22,7 +29,7 @@ function daysAgoLocal(n: number): string {
 }
 
 function formatLabel(from?: string, to?: string): string {
-  if (!from && !to) return "Date Range";
+  if (!from && !to) return "Date";
   const fmt = (s: string) => {
     const [y, m, d] = s.split("-").map(Number);
     return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -32,11 +39,12 @@ function formatLabel(from?: string, to?: string): string {
   return `Until ${fmt(to!)}`;
 }
 
-export default function DateRangeFilter({ dateFrom, dateTo, onApply }: DateRangeFilterProps) {
+export default function DateRangeFilter({ dateFrom, dateTo, onApply, accent = "indigo" }: DateRangeFilterProps) {
   const [open, setOpen] = useState(false);
   const [draftFrom, setDraftFrom] = useState(dateFrom ?? "");
   const [draftTo, setDraftTo] = useState(dateTo ?? "");
   const ref = useRef<HTMLDivElement>(null);
+  const a = ACCENT[accent];
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -68,12 +76,14 @@ export default function DateRangeFilter({ dateFrom, dateTo, onApply }: DateRange
     <div className="relative" ref={ref}>
       <button
         onClick={openMenu}
-        className={`flex items-center gap-1.5 text-sm rounded-lg border px-3 py-2 transition-colors whitespace-nowrap
-          ${active ? "border-indigo-400 bg-indigo-50 text-indigo-700 font-medium" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"}`}
+        aria-expanded={open}
+        title="Filter by when the email arrived"
+        className={`flex items-center gap-1 h-8 text-[13px] rounded-lg border px-2 transition-colors whitespace-nowrap
+          ${active ? `${a.active} font-medium` : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50"}`}
       >
         {formatLabel(dateFrom, dateTo)}
-        <svg className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        <svg className={`w-3 h-3 opacity-60 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       {open && (
@@ -87,10 +97,12 @@ export default function DateRangeFilter({ dateFrom, dateTo, onApply }: DateRange
           <div className="border-t border-gray-100 pt-2 flex flex-col gap-2">
             <label className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Custom range</label>
             <input type="date" value={draftFrom} onChange={(e) => setDraftFrom(e.target.value)}
-              className="w-full text-sm rounded-lg border border-gray-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400" />
+              aria-label="From date"
+              className={`w-full text-sm rounded-lg border border-gray-200 px-2 py-1.5 focus:outline-none focus:ring-2 ${a.ring}`} />
             <input type="date" value={draftTo} onChange={(e) => setDraftTo(e.target.value)}
-              className="w-full text-sm rounded-lg border border-gray-200 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400" />
-            <button onClick={applyCustom} className="mt-1 text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+              aria-label="To date"
+              className={`w-full text-sm rounded-lg border border-gray-200 px-2 py-1.5 focus:outline-none focus:ring-2 ${a.ring}`} />
+            <button onClick={applyCustom} className={`mt-1 text-xs font-medium px-3 py-1.5 rounded-lg text-white transition-colors ${a.btn}`}>
               Apply
             </button>
           </div>
