@@ -587,13 +587,20 @@ export default function HiringView() {
     },
   ], [handleStageChange]);
 
-  // Two-line card row for the narrow pane — fits the name, position, stage,
-  // score, experience and date in the space a 4-column table would waste.
+  // Compact card row for the narrow pane. Deliberately tight: the metadata all
+  // shares one line as "stage · experience · location · role" rather than each
+  // getting its own, so noticeably more candidates fit on screen while showing
+  // strictly more per candidate than a 4-column table would at this width.
   const renderCompactRow = useCallback((c: Candidate) => {
     const name = isPresent(c.email.candidateName) ? c.email.candidateName : parseSender(c.email.from).name;
+    const meta = [
+      c.email.candidateExperience,
+      c.email.candidateLocation,
+      c.email.candidateRole,
+    ].filter(isPresent);
     return (
-      <div className="min-w-0">
-        <div className="flex items-baseline gap-2">
+      <div className="min-w-0 leading-tight">
+        <div className="flex items-baseline gap-1.5">
           <span className="flex-1 min-w-0 truncate text-xs font-semibold text-gray-900">{name}</span>
           {c.eval && (
             <span className={`flex-shrink-0 text-[10px] font-bold px-1.5 rounded-full ${scoreColor(c.eval.matchScore)}`}>
@@ -602,13 +609,18 @@ export default function HiringView() {
           )}
           <span className="flex-shrink-0 text-[10px] text-gray-400">{formatRelative(c.email.date)}</span>
         </div>
-        <p className="truncate text-[11px] text-gray-500 mt-0.5">{c.email.subject || "(No Subject)"}</p>
-        <div className="flex items-center gap-1 mt-1">
-          <span className={`text-[9px] font-semibold px-1.5 py-px rounded-full ring-1 ring-inset ${STAGE_BADGE[c.email.stage]}`}>
+        <p className="truncate text-[11px] text-gray-500">{c.email.subject || "(No Subject)"}</p>
+        <div className="flex items-baseline gap-1.5 mt-0.5 min-w-0">
+          <span className={`flex-shrink-0 text-[9px] font-semibold px-1.5 rounded-full ring-1 ring-inset ${STAGE_BADGE[c.email.stage]}`}>
             {c.email.stage}
           </span>
-          {isPresent(c.email.candidateExperience) && (
-            <span className="text-[9px] text-gray-400 truncate">{c.email.candidateExperience}</span>
+          {meta.length > 0 && (
+            <span className="truncate text-[10px] text-gray-400" title={meta.join(" · ")}>{meta.join(" · ")}</span>
+          )}
+          {c.email.candidateSkills.length > 0 && (
+            <span className="flex-shrink-0 text-[9px] text-cyan-600" title={c.email.candidateSkills.join(", ")}>
+              {c.email.candidateSkills.length} skills
+            </span>
           )}
         </div>
       </div>
@@ -839,13 +851,16 @@ function CandidateProfileCard({ email }: { email: EmailSummary }) {
         Candidate Profile
       </p>
 
-      <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 space-y-2.5">
+      <div className="rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-2.5 space-y-2">
         {rows.length > 0 && (
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+          // Short values (Full-time, Immediate, Remote) waste most of a
+          // half-width column, so pack three across; long ones like Education
+          // span the full row instead of wrapping into a narrow sliver.
+          <dl className="grid grid-cols-3 gap-x-3 gap-y-2">
             {rows.map((r) => (
-              <div key={r.label} className="min-w-0">
-                <dt className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{r.label}</dt>
-                <dd className="text-[13px] text-gray-800 leading-snug break-words">{r.value}</dd>
+              <div key={r.label} className={`min-w-0 ${r.value.length > 34 ? "col-span-3" : ""}`}>
+                <dt className="text-[10px] font-bold uppercase tracking-wider text-gray-400 leading-tight">{r.label}</dt>
+                <dd className="text-[12px] text-gray-800 leading-snug break-words">{r.value}</dd>
               </div>
             ))}
           </dl>
@@ -853,10 +868,12 @@ function CandidateProfileCard({ email }: { email: EmailSummary }) {
 
         {hasSkills && (
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Skills</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+              Skills <span className="font-normal normal-case tracking-normal">({email.candidateSkills.length})</span>
+            </p>
             <div className="flex flex-wrap gap-1">
               {email.candidateSkills.map((s) => (
-                <span key={s} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-white text-cyan-700 ring-1 ring-cyan-200 whitespace-nowrap">{s}</span>
+                <span key={s} className="text-[10px] font-medium px-1.5 py-px rounded-full bg-white text-cyan-700 ring-1 ring-cyan-200 whitespace-nowrap">{s}</span>
               ))}
             </div>
           </div>
@@ -865,7 +882,7 @@ function CandidateProfileCard({ email }: { email: EmailSummary }) {
         {hasAchievements && (
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Key Achievements</p>
-            <p className="text-[13px] text-gray-700 leading-relaxed">{email.candidateAchievements}</p>
+            <p className="text-[12px] text-gray-700 leading-snug">{email.candidateAchievements}</p>
           </div>
         )}
       </div>
@@ -893,9 +910,14 @@ function DetailPanel({
     </div>
   );
 
+  // With a résumé attached, the covering email is rarely the point — it's
+  // usually three lines of "please find attached". So the email gets a fixed
+  // slice and the résumé takes everything else, instead of the other way round.
   const emailBlock = (
     <>
-      <div className="flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3">
+      <div className={hasAttachments
+        ? "flex-shrink-0 h-[28%] min-h-[96px] flex flex-col pane-padx pt-2 pb-2"
+        : "flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3"}>
         {(email.htmlBody || email.body) ? (
           email.htmlBody ? (
             <div className="flex-1 min-h-0 rounded-xl border border-gray-200 overflow-hidden">
@@ -903,7 +925,7 @@ function DetailPanel({
                 className="w-full h-full bg-white block" style={{ border: "none" }} title="Email content" />
             </div>
           ) : (
-            <div className="flex-1 min-h-0 bg-gray-50 rounded-xl p-4 border border-gray-200 overflow-y-auto">
+            <div className="flex-1 min-h-0 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-200 overflow-y-auto">
               <LinkifiedText
                 text={email.body ?? ""}
                 className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans break-words"
@@ -913,23 +935,24 @@ function DetailPanel({
         ) : isLoadingDetail ? (
           <DetailLoadingSkeleton message="Loading email content…" />
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-            <svg className="w-8 h-8 mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <p className="text-sm">No email body available</p>
+          <div className="flex-1 flex items-center justify-center text-gray-400">
+            <p className="text-xs">No email body</p>
           </div>
         )}
       </div>
 
       {hasAttachments && (
-        <div className="flex-shrink-0 max-h-[38%] overflow-y-auto border-t border-gray-100 pane-padx py-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">
-            Attachments ({email.attachments!.length})
+        <div className="flex-1 min-h-0 flex flex-col border-t border-gray-100 pane-padx pt-2 pb-2">
+          <p className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+            {email.attachments!.length === 1 ? "Résumé / Attachment" : `Attachments (${email.attachments!.length})`}
           </p>
-          <div className="space-y-2.5">
+          {/* A single attachment stretches to fill; several keep their fixed
+              height and scroll, since they can't all be full-size at once. */}
+          <div className={email.attachments!.length === 1
+            ? "flex-1 min-h-0 flex flex-col"
+            : "flex-1 min-h-0 overflow-y-auto space-y-2"}>
             {email.attachments!.map((att, i) => (
-              <PdfViewer key={i} attachment={att} />
+              <PdfViewer key={i} attachment={att} fill={email.attachments!.length === 1} />
             ))}
           </div>
         </div>
@@ -1084,9 +1107,11 @@ function DetailPanel({
           the original email, filling the pane; otherwise fall back to tabs. */}
       {twoColumn ? (
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          <section className="w-[46%] max-w-[600px] min-w-[360px] flex flex-col min-h-0 border-r border-gray-200">
+          {/* Deliberately the narrower column: it's text that stops when it
+              stops, whereas the résumé beside it uses every pixel it's given. */}
+          <section className="w-[38%] max-w-[520px] min-w-[320px] flex flex-col min-h-0 border-r border-gray-200">
             <p className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400 pane-padx py-1.5 border-b border-gray-100">AI Insights</p>
-            <div className="flex-1 overflow-y-auto pane-padx py-4">{insightsBlock}</div>
+            <div className="flex-1 overflow-y-auto pane-padx py-3">{insightsBlock}</div>
           </section>
           <section className="flex-1 flex flex-col min-h-0">
             <p className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400 pane-padx py-1.5 border-b border-gray-100">Original Email</p>

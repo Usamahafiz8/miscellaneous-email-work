@@ -3,7 +3,16 @@
 import { useState, useEffect, useRef } from "react";
 import type { EmailAttachment } from "@/lib/types";
 
-export default function PdfViewer({ attachment }: { attachment: EmailAttachment }) {
+interface PdfViewerProps {
+  attachment: EmailAttachment;
+  // Stretch to fill the parent's remaining height instead of a fixed 460px.
+  // Used when this is the only attachment in a reading pane — for a hiring
+  // application the résumé is the main artifact, so it should get the space
+  // rather than sit in a short box under a three-line covering email.
+  fill?: boolean;
+}
+
+export default function PdfViewer({ attachment, fill = false }: PdfViewerProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const prevUrl = useRef<string | null>(null);
@@ -43,8 +52,8 @@ export default function PdfViewer({ attachment }: { attachment: EmailAttachment 
   if (!blobUrl) return null;
 
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
+    <div className={`rounded-xl border border-gray-200 overflow-hidden ${fill ? "flex-1 min-h-0 flex flex-col" : ""}`}>
+      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <svg className="w-4 h-4 text-red-500 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5z" />
@@ -78,7 +87,12 @@ export default function PdfViewer({ attachment }: { attachment: EmailAttachment 
           </a>
         </div>
       </div>
-      <embed src={blobUrl} type="application/pdf" className="w-full" style={{ height: "460px" }} />
+      <embed
+        src={blobUrl}
+        type="application/pdf"
+        className={fill ? "w-full flex-1 min-h-0 block" : "w-full block"}
+        style={fill ? undefined : { height: "460px" }}
+      />
     </div>
   );
 }

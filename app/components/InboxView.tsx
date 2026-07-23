@@ -722,9 +722,14 @@ function ReadingPane({
     <EmailInsightsPanel email={email} />
   );
 
+  // When something is attached it's usually the point of the email, so the body
+  // gets a fixed slice and the attachment takes the rest — rather than a short
+  // note filling the pane while its PDF is squeezed into a strip at the bottom.
   const emailBlock = (
     <>
-      <div className="flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3">
+      <div className={hasAttachments
+        ? "flex-shrink-0 h-[32%] min-h-[110px] flex flex-col pane-padx pt-2 pb-2"
+        : "flex-1 min-h-0 flex flex-col pane-padx pt-3 pb-3"}>
         {(email.htmlBody || email.body) ? (
           email.htmlBody ? (
             <div className="flex-1 min-h-0 rounded-xl border border-gray-200 overflow-hidden">
@@ -737,7 +742,7 @@ function ReadingPane({
               />
             </div>
           ) : (
-            <div className="flex-1 min-h-0 bg-gray-50 rounded-xl p-4 border border-gray-200 overflow-y-auto">
+            <div className="flex-1 min-h-0 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-200 overflow-y-auto">
               <LinkifiedText
                 text={email.body ?? ""}
                 className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap font-sans break-words"
@@ -747,23 +752,22 @@ function ReadingPane({
         ) : isLoadingDetail ? (
           <DetailLoadingSkeleton message="Loading email content…" />
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-            <svg className="w-8 h-8 mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <p className="text-sm">No email body available</p>
+          <div className="flex-1 flex items-center justify-center text-gray-400">
+            <p className="text-xs">No email body</p>
           </div>
         )}
       </div>
 
       {hasAttachments && (
-        <div className="flex-shrink-0 max-h-[38%] overflow-y-auto border-t border-gray-100 pane-padx py-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">
-            Attachments ({email.attachments!.length})
+        <div className="flex-1 min-h-0 flex flex-col border-t border-gray-100 pane-padx pt-2 pb-2">
+          <p className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+            {email.attachments!.length === 1 ? "Attachment" : `Attachments (${email.attachments!.length})`}
           </p>
-          <div className="space-y-2.5">
+          <div className={email.attachments!.length === 1
+            ? "flex-1 min-h-0 flex flex-col"
+            : "flex-1 min-h-0 overflow-y-auto space-y-2"}>
             {email.attachments!.map((att, i) => (
-              <PdfViewer key={i} attachment={att} />
+              <PdfViewer key={i} attachment={att} fill={email.attachments!.length === 1} />
             ))}
           </div>
         </div>
@@ -912,9 +916,11 @@ function ReadingPane({
           narrow for two readable columns → fall back to the tabbed layout. */}
       {twoColumn ? (
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          <section className="w-[46%] max-w-[600px] min-w-[360px] flex flex-col min-h-0 border-r border-gray-200">
+          {/* The narrower column — insight text has a natural end, while the
+              email/attachment beside it fills whatever space it's given. */}
+          <section className="w-[42%] max-w-[560px] min-w-[320px] flex flex-col min-h-0 border-r border-gray-200">
             <p className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400 pane-padx py-1.5 border-b border-gray-100">AI Insights</p>
-            <div className="flex-1 overflow-y-auto pane-padx py-4">{insightsBlock}</div>
+            <div className="flex-1 overflow-y-auto pane-padx py-3">{insightsBlock}</div>
           </section>
           <section className="flex-1 flex flex-col min-h-0">
             <p className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-gray-400 pane-padx py-1.5 border-b border-gray-100">Original Email</p>
