@@ -48,6 +48,10 @@ interface DataTableProps<T> {
   rowKey: (row: T) => string;
   onRowClick?: (row: T) => void;
   isRowSelected?: (row: T) => boolean;
+  // Extra classes for one row, on top of the shared row styling. Used for the
+  // arrival animation on mail that streamed in mid-sync; keep it to purely
+  // decorative classes, since the base layout/state classes still apply.
+  rowClassName?: (row: T) => string | undefined;
   sort?: DataTableSort;
   onSortChange?: (sort: DataTableSort) => void;
   selectable?: boolean;
@@ -78,7 +82,7 @@ function parsePx(width: string | undefined): number | null {
 
 export default function DataTable<T>({
   columns, renderRow, variant = "grid", rows, rowKey, onRowClick, isRowSelected,
-  sort, onSortChange, selectable, selectedIds, onSelectionChange,
+  rowClassName, sort, onSortChange, selectable, selectedIds, onSelectionChange,
   bulkActions, pagination, isLoading, emptyState, fillHeight = true,
 }: DataTableProps<T>) {
   const ids = rows.map(rowKey);
@@ -195,7 +199,7 @@ export default function DataTable<T>({
                   onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(row); } } : undefined}
                   className={`group flex items-center gap-3 row-pad transition-colors ${onRowClick ? "cursor-pointer" : ""} ${
                     selected ? "bg-indigo-50" : "bg-white hover:bg-gray-50"
-                  }`}
+                  } ${rowClassName?.(row) ?? ""}`}
                 >
                   {selectable && (
                     <div
@@ -291,7 +295,7 @@ export default function DataTable<T>({
                       selected
                         ? "bg-indigo-50 shadow-[inset_2px_0_0_theme(colors.indigo.500)]"
                         : "bg-white hover:bg-indigo-50/40"
-                    }`}
+                    } ${rowClassName?.(row) ?? ""}`}
                   >
                     {selectable && (
                       <td className="row-pad" onClick={(e) => e.stopPropagation()}>

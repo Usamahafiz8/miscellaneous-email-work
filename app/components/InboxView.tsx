@@ -203,7 +203,7 @@ export default function InboxView() {
   // resetting on every click.
   const selectedId = pathname.startsWith("/inbox/") ? decodeURIComponent(pathname.slice("/inbox/".length)) : undefined;
   const {
-    counts, syncEmails, clearAndResync, fetchAllEmails, isSyncing, syncVersion,
+    counts, syncEmails, clearAndResync, fetchAllEmails, isSyncing, syncVersion, arrivingEmails,
     loadingDetailId, loadEmailDetail, getEmailDetail, patchEmail, availableTags, notify,
   } = useDashboard();
 
@@ -453,6 +453,46 @@ export default function InboxView() {
 
   const hasFilters = !!(debouncedSearch || category.length || priority.length || status.length || actionRequired.length || dateFrom || dateTo);
 
+  // ── Live arrivals ─────────────────────────────────────────────────────────
+  // Mail the running sync streams in gets prepended, so you watch it land one at
+  // a time instead of waiting for a batch to finish and the page to refetch.
+  //
+  // Only correct when this page is showing the newest mail unfiltered: page 1,
+  // date descending, no filters. Anywhere else a new email may not belong in the
+  // result set at all (wrong filter) or not on this page (wrong sort/offset), and
+  // prepending it would misrepresent the query — those views just refetch instead.
+  const canPrependArrivals = page === 1 && sort.field === "date" && sort.order === "desc" && !hasFilters;
+
+  // Which arrivals have already been folded in. Tracked in a ref rather than
+  // derived from `rows` so the merge stays idempotent across the refetches that
+  // run during a sync — and so the animation fires once per email, not again
+  // every time a refetch replaces the row object behind the same key.
+  const mergedArrivalsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    // A new sync clears arrivals; reset so the next one animates from scratch.
+    if (arrivingEmails.length === 0) {
+      mergedArrivalsRef.current = new Set();
+      return;
+    }
+    if (!canPrependArrivals) return;
+
+    const fresh = arrivingEmails.filter((e) => !mergedArrivalsRef.current.has(e.emailId));
+    if (fresh.length === 0) return;
+    for (const e of fresh) mergedArrivalsRef.current.add(e.emailId);
+
+    setRows((prev) => {
+      const known = new Set(prev.map((r) => r.emailId));
+      const add = fresh.filter((e) => !known.has(e.emailId));
+      // arrivingEmails is newest-first already, matching this view's sort.
+      return add.length ? [...add, ...prev] : prev;
+    });
+    // `total` is deliberately left alone: the sync's own refetch (syncVersion
+    // bumps at least once a second) reconciles it against the real count, and
+    // guessing here would drift whenever a streamed email turned out to already
+    // be stored under a Message-ID we'd seen before.
+  }, [arrivingEmails, canPrependArrivals]);
+
   const currentFilterBag: InboxFilterBag = { search: searchInput, category, priority, status, actionRequired, dateFrom, dateTo };
   function applyFilterPreset(f: InboxFilterBag) {
     setSearchInput(f.search);
@@ -613,6 +653,7 @@ export default function InboxView() {
           rowKey={(r) => r.emailId}
           onRowClick={handleSelect}
           isRowSelected={(r) => selectedId === r.emailId}
+          rowClassName={(r) => (mergedArrivalsRef.current.has(r.emailId) ? "animate-row-arrive" : undefined)}
           sort={sort}
           onSortChange={setSort}
           selectable

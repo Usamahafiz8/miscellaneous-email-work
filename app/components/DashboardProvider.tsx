@@ -11,6 +11,11 @@ import AppChrome from "./AppChrome";
 // comfortably covers realistic recent-activity windows without unbounded growth.
 const OVERVIEW_PAGE_SIZE = 300;
 
+// Cap on streamed arrivals kept in memory during one sync. Comfortably more than
+// any list page shows, so the visible top of the list is always covered, while a
+// full-mailbox import can't accumulate tens of thousands of rows.
+const MAX_TRACKED_ARRIVALS = 200;
+
 interface Counts {
   total: number;
   unread: number;
@@ -39,11 +44,15 @@ interface DashboardContextValue {
   dismissToast: (id: string) => void;
   syncEmails: () => Promise<void>;
   clearAndResync: () => Promise<void>;
-  // Pages through the ENTIRE mailbox (offset 0, 50, 100, …) storing every email,
-  // then summarizes — for a full backfill, not just the newest page.
+  // Now an alias for syncEmails: with a UID watermark, "sync" and "import
+  // everything" are the same operation — both drain whatever hasn't been seen.
   fetchAllEmails: () => Promise<void>;
   // Bumped every time a sync batch lands — views depend on this to know when to refetch their page.
   syncVersion: number;
+  // Emails the in-flight sync has streamed in, newest first. List views prepend
+  // any they don't already have so mail lands visibly, one at a time, as it's
+  // downloaded — see /api/email/stream. Empty when no sync is running.
+  arrivingEmails: EmailSummary[];
   // Home's recent-activity dataset (bounded, see OVERVIEW_PAGE_SIZE). Lazily
   // loaded — only fetched once something actually reads it (Home calls this on
   // mount if empty), so landing on Inbox/Hiring/Candidates doesn't pay for it.
@@ -246,6 +255,81 @@ export default function DashboardProvider({
     return done;
   }, [throttledRefresh, setSyncMessage]);
 
+  // ── Live arrivals ─────────────────────────────────────────────────────────
+  // Emails the current sync has streamed in, newest first. List views prepend
+  // these so mail visibly lands one at a time as it's downloaded, instead of
+  // appearing in a lump when the whole batch finishes. Cleared at the start of
+  // each sync; views animate anything they haven't rendered yet.
+  const [arrivingEmails, setArrivingEmails] = useState<EmailSummary[]>([]);
+
+  // Consumes one SSE batch from /api/email/stream, pushing each email into
+  // `arrivingEmails` as its event lands. Resolves with the batch's summary so the
+  // caller can decide whether to open another stream.
+  //
+  // Returns null if streaming isn't usable at all (no body reader, immediate
+  // failure) so the caller can fall back to the plain batch endpoint — the
+  // animation is a presentation nicety and must never be the reason a sync fails.
+  const streamOneBatch = useCallback(async (): Promise<{ newCount: number; remaining: number } | null> => {
+    let res: Response;
+    try {
+      res = await fetch("/api/email/stream", { method: "POST" });
+    } catch {
+      return null;
+    }
+    if (redirectToLoginIfUnauthorized(res)) return { newCount: 0, remaining: 0 };
+    if (!res.ok || !res.body) return null;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let outcome: { newCount: number; remaining: number } | null = null;
+    let streamError: string | null = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE frames are separated by a blank line; a chunk can split one, so only
+      // complete frames are consumed and the remainder stays buffered.
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        let event: Record<string, unknown>;
+        try {
+          event = JSON.parse(line.slice(5).trim());
+        } catch {
+          continue; // partial/garbled frame — skip rather than abort the sync
+        }
+
+        if (event.type === "email" && event.summary) {
+          const summary = event.summary as EmailSummary;
+          setArrivingEmails((prev) => (
+            prev.some((e) => e.emailId === summary.emailId)
+              ? prev
+              // Bounded: importing a 50k mailbox would otherwise hold every
+              // arrival in memory for the whole run. Only the newest matter —
+              // anything older has long since been replaced by a real refetch.
+              : [summary, ...prev].slice(0, MAX_TRACKED_ARRIVALS)
+          ));
+        } else if (event.type === "done") {
+          outcome = {
+            newCount: Number(event.newCount ?? 0),
+            remaining: Number(event.remaining ?? 0),
+          };
+        } else if (event.type === "error") {
+          streamError = String(event.error ?? "Sync failed");
+        }
+      }
+    }
+
+    if (streamError) throw new Error(streamError);
+    return outcome;
+  }, []);
+
   // Downloads every message this account hasn't seen, draining the server's
   // backlog. Returns how many new emails were stored.
   //
@@ -257,15 +341,29 @@ export default function DashboardProvider({
   // sync and a full backfill are now literally the same operation.
   const pullNewMail = useCallback(async (label: string): Promise<number> => {
     let totalNew = 0;
+    setArrivingEmails([]);
+    // Streaming is preferred (mail animates in as it lands) but falls back to the
+    // plain batch endpoint per-iteration if the stream can't be used.
+    let useStream = true;
     // Safety cap: 1000 batches of 50 → up to 50k messages.
     for (let i = 0; i < 1000; i++) {
-      const res = await fetch("/api/email/process", { method: "POST" });
-      if (redirectToLoginIfUnauthorized(res)) return totalNew;
-      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to fetch emails");
+      let newCount: number;
+      let remaining: number;
 
-      totalNew += data.newCount ?? 0;
-      const remaining = data.remaining ?? 0;
+      const streamed = useStream ? await streamOneBatch() : null;
+      if (streamed) {
+        ({ newCount, remaining } = streamed);
+      } else {
+        useStream = false;
+        const res = await fetch("/api/email/process", { method: "POST" });
+        if (redirectToLoginIfUnauthorized(res)) return totalNew;
+        const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
+        if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to fetch emails");
+        newCount = data.newCount ?? 0;
+        remaining = data.remaining ?? 0;
+      }
+
+      totalNew += newCount;
       const isDone = remaining === 0;
       await throttledRefresh(isDone); // force a real refresh on the final batch
 
@@ -276,7 +374,7 @@ export default function DashboardProvider({
       if (isDone) break;
     }
     return totalNew;
-  }, [throttledRefresh, setSyncMessage]);
+  }, [throttledRefresh, setSyncMessage, streamOneBatch]);
 
   // Summarization runs detached from the sync it was triggered by, so the UI is
   // never held open waiting on the LLM. This ref keeps a second Sync click from
@@ -436,11 +534,11 @@ export default function DashboardProvider({
 
   const contextValue = useMemo<DashboardContextValue>(() => ({
     counts, isSyncing, lastFetched, toasts, notify, dismissToast,
-    syncEmails, clearAndResync, fetchAllEmails, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
+    syncEmails, clearAndResync, fetchAllEmails, syncVersion, arrivingEmails, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
     loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   }), [
     counts, isSyncing, lastFetched, toasts, notify, dismissToast,
-    syncEmails, clearAndResync, fetchAllEmails, syncVersion, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
+    syncEmails, clearAndResync, fetchAllEmails, syncVersion, arrivingEmails, overviewSummaries, isOverviewLoading, loadOverviewIfNeeded,
     loadingDetailId, loadEmailDetail, getEmailDetail, availableTags, availableSkills, patchEmail,
   ]);
 

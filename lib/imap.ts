@@ -147,7 +147,12 @@ async function parseMessage(raw: Buffer, uid?: number): Promise<EmailMessage> {
 export async function fetchNewEmailsByUid(
   config: IMAPConfig,
   cursor: MailboxCursor | null,
-  limit: number
+  limit: number,
+  // Called once per message, the moment it finishes parsing — IMAP delivers
+  // messages one at a time, so this lets a caller forward each one onward (see
+  // the SSE route) instead of waiting for the whole batch to land. Purely
+  // observational: throwing in here must not abort the fetch, so it's guarded.
+  onEmail?: (email: EmailMessage, index: number, batchSize: number) => void
 ): Promise<UidFetchResult> {
   return new Promise((resolve, reject) => {
     const imap = createImapClient(config);
@@ -222,7 +227,15 @@ export async function fetchNewEmailsByUid(
               msg.once("attributes", (attrs) => { uid = Number(attrs.uid); });
               msg.once("end", async () => {
                 try {
-                  messages.push(await parseMessage(Buffer.concat(chunks), uid));
+                  const email = await parseMessage(Buffer.concat(chunks), uid);
+                  messages.push(email);
+                  try {
+                    onEmail?.(email, messages.length, batch.length);
+                  } catch (cbErr) {
+                    // A broken consumer (e.g. a closed SSE stream) must not cost
+                    // us the download — the message is already in `messages`.
+                    console.warn("fetchNewEmailsByUid: onEmail callback threw —", cbErr instanceof Error ? cbErr.message : cbErr);
+                  }
                 } catch (parseErr) {
                   // Skipped permanently, not retried: the watermark advances past
                   // it below regardless, so one malformed message can't wedge
