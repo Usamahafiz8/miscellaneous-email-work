@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import type { EmailSummary, EmailMessage, EmailAttachment, EmailListQuery, EmailListResult } from "./types";
+import type { MailboxCursor } from "./imap";
 import { parseSearchQuery } from "./searchQuery";
 
 function toEmailSummary(row: {
@@ -258,27 +259,10 @@ export async function getPendingEmails(
   }));
 }
 
-export async function getExistingEmailIds(ids: string[], account: string): Promise<Set<string>> {
-  const rows = await prisma.emailSummary.findMany({
-    where: { account, emailId: { in: ids } },
-    select: { emailId: true },
-  });
-  return new Set(rows.map((r) => r.emailId));
-}
-
-export async function getSummariesByIds(ids: string[], account: string): Promise<EmailSummary[]> {
-  const rows = await prisma.emailSummary.findMany({
-    where: { account, emailId: { in: ids } },
-    select: LIST_SELECT,
-  });
-  // preserve the order of ids
-  const map = new Map(rows.map((r) => [r.emailId, r]));
-  const summaries = ids.flatMap((id) =>
-    map.has(id) ? [toEmailSummary({ ...map.get(id)!, body: null, htmlBody: null, attachments: null })] : []
-  );
-  await attachAttachmentCounts(summaries, account);
-  return summaries;
-}
+// getExistingEmailIds/getSummariesByIds lived here to support the old sync:
+// download a 50-message window, ask which ids were already stored, discard the
+// duplicates, then return the whole window to the client. The UID watermark
+// means nothing already-seen is downloaded in the first place, so both are gone.
 
 // Fetches the full row (including body/htmlBody/attachments) for a single email —
 // used when a user opens an email's detail pane.
@@ -401,6 +385,36 @@ export async function cacheRawEmails(
   return count;
 }
 
+// ─── IMAP sync watermark ────────────────────────────────────────────────────
+
+// Stored as BigInt (32-bit unsigned UIDs overflow Postgres int4) but handed
+// around as numbers — the values stay far below 2^53, so the round-trip is lossless.
+export async function getMailboxCursor(account: string): Promise<MailboxCursor | null> {
+  const row = await prisma.mailboxSync.findUnique({ where: { account } });
+  return row
+    ? { uidValidity: Number(row.uidValidity), lastSeenUid: Number(row.lastSeenUid) }
+    : null;
+}
+
+export async function setMailboxCursor(account: string, cursor: MailboxCursor): Promise<void> {
+  await prisma.mailboxSync.upsert({
+    where: { account },
+    update: { uidValidity: BigInt(cursor.uidValidity), lastSeenUid: BigInt(cursor.lastSeenUid) },
+    create: { account, uidValidity: BigInt(cursor.uidValidity), lastSeenUid: BigInt(cursor.lastSeenUid) },
+  });
+}
+
+// Forgets where the sync got to, so the next one re-reads the whole mailbox.
+// Used by the clean-rebuild path (and whenever the server changes uidValidity).
+export async function resetMailboxCursor(account: string): Promise<void> {
+  await prisma.mailboxSync.deleteMany({ where: { account } });
+}
+
 export async function clearCache(account: string): Promise<void> {
-  await prisma.emailSummary.deleteMany({ where: { account } });
+  // The watermark has to go with the rows: leaving it behind would tell the next
+  // sync everything was already downloaded, and a cleared mailbox would stay empty.
+  await prisma.$transaction([
+    prisma.emailSummary.deleteMany({ where: { account } }),
+    prisma.mailboxSync.deleteMany({ where: { account } }),
+  ]);
 }

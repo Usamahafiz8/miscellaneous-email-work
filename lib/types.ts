@@ -14,6 +14,10 @@ export interface EmailAttachment {
 
 export interface EmailMessage {
   id: string;
+  // IMAP UID — stable per mailbox, used to advance the sync watermark so a sync
+  // only ever downloads mail it hasn't seen (see MailboxSync / fetchNewEmailsByUid).
+  // Absent on the legacy sequence-number fetch path.
+  uid?: number;
   from: string;
   subject: string;
   date: string;

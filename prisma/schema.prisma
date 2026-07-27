@@ -70,6 +70,31 @@ model EmailSummary {
   @@map("email_summaries")
 }
 
+// Per-account IMAP sync watermark. Without this, a sync has no memory of what
+// it already downloaded: the old code re-scanned a fixed 50-message window of
+// the mailbox every time and discarded duplicates afterwards, so syncing a
+// mailbox with no new mail still pulled 50 complete messages (bodies, HTML,
+// base64 PDFs) off the server.
+//
+// IMAP UIDs are stable and monotonic per mailbox, so remembering the highest one
+// seen turns a sync into "UID SEARCH <lastSeenUid+1>:*" — the server returns
+// nothing (sub-second) or exactly the new messages, and only those get
+// downloaded. Dedup stops being something we have to get right after the fact.
+//
+// uidValidity is the mailbox generation counter: if the server ever changes it,
+// every stored UID is meaningless and the mailbox must be re-read from scratch.
+model MailboxSync {
+  account     String   @id
+  // BigInt because both are 32-bit *unsigned* on the wire, which overflows
+  // Postgres int4. Values stay well under 2^53, so reading them back as JS
+  // numbers is lossless.
+  uidValidity BigInt
+  lastSeenUid BigInt   @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@map("mailbox_sync")
+}
+
 // A saved job posting on the /jobs page — HR pastes a job description, AI
 // extracts structured requirements below, HR can edit/add to them, then
 // scans all Hiring candidates for a match score (see CandidateMatch).

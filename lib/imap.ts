@@ -59,6 +59,205 @@ export async function testIMAPConnection(config: IMAPConfig): Promise<void> {
   });
 }
 
+// Where a mailbox's sync left off. Persisted per account (see MailboxSync).
+export interface MailboxCursor {
+  uidValidity: number;
+  lastSeenUid: number;
+}
+
+export interface UidFetchResult {
+  // Only messages that were actually new — never anything already downloaded.
+  emails: EmailMessage[];
+  uidValidity: number;
+  // Advance the stored watermark to this. Includes UIDs we deliberately skipped
+  // (unparseable messages), so a bad message can't wedge the sync forever.
+  lastSeenUid: number;
+  // Known-new UIDs left over beyond `limit` — lets the caller loop with progress.
+  remaining: number;
+  totalCount: number;
+  // The server changed uidValidity: every stored UID is now meaningless and the
+  // caller must treat this as a from-scratch re-read of the mailbox.
+  uidValidityChanged: boolean;
+}
+
+// Parses one full RFC 2822 message into an EmailMessage. Shared by both fetch
+// paths so the two can't drift in how they derive ids, bodies or attachments.
+async function parseMessage(raw: Buffer, uid?: number): Promise<EmailMessage> {
+  const parsed = await simpleParser(raw);
+
+  const fromAddress = parsed.from?.text ?? "unknown@unknown.com";
+  const subject = parsed.subject ?? "(No Subject)";
+  const date = parsed.date?.toISOString() ?? new Date().toISOString();
+
+  let fullText = parsed.text ?? (parsed.html ? sanitizeHtml(parsed.html) : "") ?? "";
+  fullText = fullText.slice(0, MAX_BODY_LENGTH).trim();
+
+  const htmlBody = parsed.html ? parsed.html.slice(0, 50_000) : undefined;
+
+  const attachments: EmailAttachment[] = [];
+  let totalSize = 0;
+  for (const att of parsed.attachments ?? []) {
+    if (!isPdf(att.contentType, att.filename)) continue;
+    const size = att.content.byteLength;
+    if (size > MAX_ATTACHMENT_BYTES) continue;
+    if (totalSize + size > MAX_TOTAL_ATTACH_BYTES) break;
+    attachments.push({
+      filename: att.filename ?? "attachment.pdf",
+      contentType: att.contentType,
+      size,
+      data: att.content.toString("base64"),
+    });
+    totalSize += size;
+  }
+
+  // Stable, mailbox-unique id so a re-sync recognizes mail it has already
+  // stored (dedup is keyed on this). The RFC 5322 Message-ID header is globally
+  // unique and stable per message; fall back to a deterministic hash of the
+  // envelope for the rare message without one. Never random — a random id looks
+  // "new" on every fetch and piles up duplicate rows.
+  const stableId = parsed.messageId?.trim()
+    || "hash-" + createHash("sha1")
+         .update(`${fromAddress}|${subject}|${parsed.date?.toISOString() ?? ""}`)
+         .digest("hex");
+
+  return {
+    id: stableId,
+    uid,
+    from: fromAddress,
+    subject,
+    date,
+    text: fullText.slice(0, PREVIEW_LENGTH),
+    fullText,
+    htmlBody,
+    attachments: attachments.length > 0 ? attachments : undefined,
+  };
+}
+
+// Downloads only mail this account hasn't seen before.
+//
+// Replaces the old sequence-number window (`${total - offset}:${total}`), which
+// had two problems: it re-downloaded 50 complete messages on every sync just to
+// discover it already had them, and sequence numbers *shift* whenever mail
+// arrives or is deleted — so during a long import windows overlapped (wasted
+// work) and, worse, some messages were skipped entirely.
+//
+// UIDs don't shift. Pass the stored cursor and this asks the server directly for
+// what's above the watermark; with no new mail that's one SEARCH and no message
+// bodies at all.
+export async function fetchNewEmailsByUid(
+  config: IMAPConfig,
+  cursor: MailboxCursor | null,
+  limit: number
+): Promise<UidFetchResult> {
+  return new Promise((resolve, reject) => {
+    const imap = createImapClient(config);
+
+    const timeout = setTimeout(() => {
+      imap.destroy();
+      reject(new Error("Fetch timed out after 60 seconds"));
+    }, 60_000);
+
+    const done = (result: UidFetchResult) => {
+      clearTimeout(timeout);
+      imap.end();
+      resolve(result);
+    };
+    const fail = (err: Error) => {
+      clearTimeout(timeout);
+      imap.destroy();
+      reject(err);
+    };
+
+    imap.once("ready", () => {
+      imap.openBox("INBOX", true, (err, box) => {
+        if (err) return fail(err);
+
+        const uidValidity = Number(box.uidvalidity);
+        const totalCount = box.messages.total;
+
+        // A changed uidValidity invalidates every stored UID — start over.
+        const uidValidityChanged = !!cursor && cursor.uidValidity !== uidValidity;
+        const lastSeenUid = !cursor || uidValidityChanged ? 0 : cursor.lastSeenUid;
+
+        if (totalCount === 0) {
+          return done({ emails: [], uidValidity, lastSeenUid, remaining: 0, totalCount, uidValidityChanged });
+        }
+
+        imap.search([["UID", `${lastSeenUid + 1}:*`]], (searchErr, rawUids) => {
+          if (searchErr) return fail(searchErr);
+
+          // IMAP quirk: `n:*` is never empty — when n exceeds the highest UID in
+          // the mailbox the server returns the *last* message anyway. Without
+          // this filter every "no new mail" sync would re-download one message
+          // and, if it had no Message-ID, insert it again.
+          const uids = (rawUids ?? [])
+            .map(Number)
+            .filter((u) => Number.isFinite(u) && u > lastSeenUid)
+            .sort((a, b) => a - b);
+
+          if (uids.length === 0) {
+            return done({ emails: [], uidValidity, lastSeenUid, remaining: 0, totalCount, uidValidityChanged });
+          }
+
+          // Oldest-first so the watermark only ever advances over a contiguous,
+          // fully-processed run — a crash mid-batch can't strand newer mail
+          // behind an advanced cursor.
+          const batch = uids.slice(0, limit);
+          const remaining = uids.length - batch.length;
+          const highestInBatch = batch[batch.length - 1];
+
+          const messages: EmailMessage[] = [];
+          const pending: Promise<void>[] = [];
+
+          const fetcher = imap.fetch(batch, { bodies: [""], struct: true });
+
+          fetcher.on("message", (msg) => {
+            const chunks: Buffer[] = [];
+            let uid: number | undefined;
+
+            pending.push(new Promise<void>((res) => {
+              msg.on("body", (stream: NodeJS.ReadableStream) => {
+                stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+              });
+              msg.once("attributes", (attrs) => { uid = Number(attrs.uid); });
+              msg.once("end", async () => {
+                try {
+                  messages.push(await parseMessage(Buffer.concat(chunks), uid));
+                } catch (parseErr) {
+                  // Skipped permanently, not retried: the watermark advances past
+                  // it below regardless, so one malformed message can't wedge
+                  // every later sync behind it.
+                  console.warn(`fetchNewEmailsByUid: skipping unparseable message uid=${uid} —`, parseErr instanceof Error ? parseErr.message : parseErr);
+                }
+                res();
+              });
+            }));
+          });
+
+          fetcher.once("error", fail);
+
+          fetcher.once("end", async () => {
+            await Promise.all(pending);
+            messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            done({
+              emails: messages,
+              uidValidity,
+              // Advance over the whole batch, including anything skipped above.
+              lastSeenUid: highestInBatch,
+              remaining,
+              totalCount,
+              uidValidityChanged,
+            });
+          });
+        });
+      });
+    });
+
+    imap.once("error", fail);
+    imap.connect();
+  });
+}
+
 export async function fetchEmails(
   config: IMAPConfig,
   pageSize: number,

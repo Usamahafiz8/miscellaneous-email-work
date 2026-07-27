@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchEmails } from "@/lib/imap";
-import { cacheRawEmails, getCachedSummaries, getExistingEmailIds, getSummariesByIds } from "@/lib/cache";
+import { fetchNewEmailsByUid } from "@/lib/imap";
+import { cacheRawEmails, getCachedSummaries, getMailboxCursor, setMailboxCursor } from "@/lib/cache";
 import { parseEmailListQuery } from "@/lib/queryParams";
 import { currentAccount, currentImapConfig } from "@/lib/session";
 
-// No LLM here anymore (POST just IMAP-fetches a page and stores raw rows; GET is
-// DB-only), but the IMAP fetch has a 30s internal timeout, so keep 60s headroom.
-export const maxDuration = 60;
+// No LLM here (POST downloads new mail and stores raw rows; GET is DB-only), but
+// the IMAP fetch has a 60s internal timeout, so keep headroom above it.
+export const maxDuration = 90;
 
-const PAGE_SIZE = 50;
+// Cap on how many *new* messages one request downloads. Unlike the old page
+// size this is not a window over the mailbox — it only ever bounds genuinely
+// unseen mail, so the steady-state sync fetches 0 and returns in milliseconds.
+const BATCH_SIZE = 50;
 
 // Load emails from DB only — no IMAP, no AI calls. Supports the same
 // filter/sort/page query contract as GET /api/summaries.
@@ -30,48 +33,45 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Sync from IMAP — stores newly-fetched emails as raw, un-summarized rows. No AI
-// runs here: the LLM is invoked lazily the first time an email is opened (see
-// POST /api/email/resync), so a sync is fast and cheap regardless of volume.
-export async function POST(request: NextRequest) {
+// Downloads mail this account hasn't seen yet and stores it as raw,
+// un-summarized rows. No AI runs here: the LLM is invoked separately (lazily on
+// first open, or via /api/email/summarize-pending), so a sync never waits on it.
+//
+// Driven by the stored UID watermark rather than a client-supplied offset — the
+// server asks IMAP "what's above UID N", so with no new mail nothing is
+// downloaded at all and this returns in milliseconds. The client loops while
+// `remaining > 0` to drain a backlog.
+export async function POST() {
   const account = currentAccount();
   const config = currentImapConfig();
   if (!account || !config) {
     return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => ({}));
-  const offset = Math.max(0, Number(body.offset ?? 0));
-
   try {
-    const { emails, totalCount } = await fetchEmails(config, PAGE_SIZE, offset);
+    const cursor = await getMailboxCursor(account);
+    const result = await fetchNewEmailsByUid(config, cursor, BATCH_SIZE);
 
-    if (emails.length === 0) {
-      return NextResponse.json({ success: true, summaries: [], emailCount: 0, newCount: 0, fetched: 0, pendingCount: 0, totalCount, offset });
-    }
-
-    // Which of this page's emails aren't in the DB yet (within this account)
-    const existingIds = await getExistingEmailIds(emails.map((e) => e.id), account);
-    const newEmails = emails.filter((e) => !existingIds.has(e.id));
-
-    // Store the new ones as raw rows — no AI call, no batch cap needed.
-    const newCount = await cacheRawEmails(newEmails, account);
-
-    // Return this full page from DB (raw rows included, marked summarized=false)
-    const summaries = await getSummariesByIds(emails.map((e) => e.id), account);
+    // Store first, advance the watermark second: if the write fails we'd rather
+    // re-download this batch next time than skip past it permanently.
+    const newCount = await cacheRawEmails(result.emails, account);
+    await setMailboxCursor(account, {
+      uidValidity: result.uidValidity,
+      lastSeenUid: result.lastSeenUid,
+    });
 
     return NextResponse.json({
       success: true,
-      summaries,
-      emailCount: summaries.length,
       newCount,
-      // Number of messages this page actually pulled from IMAP — lets the client
-      // advance `offset` and know when it has paged through the whole mailbox.
-      fetched: emails.length,
-      // No deferred AI work anymore — a single call fully syncs the page.
-      pendingCount: 0,
-      totalCount,
-      offset,
+      // Genuinely-new messages downloaded this call (>= newCount; the difference
+      // is mail already stored under a Message-ID we'd seen before).
+      fetched: result.emails.length,
+      // Known-new messages still queued on the server — client loops until 0.
+      remaining: result.remaining,
+      totalCount: result.totalCount,
+      // The mailbox was re-keyed server-side, so this sync is re-reading it from
+      // the beginning; existing rows still dedup on Message-ID.
+      uidValidityChanged: result.uidValidityChanged,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Processing failed";

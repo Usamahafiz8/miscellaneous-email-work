@@ -246,80 +246,97 @@ export default function DashboardProvider({
     return done;
   }, [throttledRefresh, setSyncMessage]);
 
-  // Sync from IMAP: fetch the newest mail as raw rows (fast, no AI), then
-  // summarize any pending emails (this fetch + any earlier backlog) in batches so
-  // the list fills in with real AI summaries instead of staying blank.
-  const syncEmails = useCallback(async () => {
-    setIsSyncing(true);
-    setSyncMessage(null);
-    setError(null);
-    try {
-      // Phase 1 — fetch & store raw (no LLM, returns immediately).
-      const res = await fetch("/api/email/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset: 0 }),
-      });
-      if (redirectToLoginIfUnauthorized(res)) return;
-      const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
-      if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to sync emails");
-
-      const newCount = data.newCount ?? 0;
-      setSyncVersion((v) => v + 1);
-      await Promise.all([refreshCounts(), refreshOverview()]);
-      setSyncMessage(newCount > 0 ? `${newCount} new email${newCount === 1 ? "" : "s"} fetched — summarizing…` : "Summarizing pending emails…");
-
-      // Phase 2 — summarize pending (newly fetched + any backlog).
-      const summarized = await summarizePending("Summarizing…");
-
-      setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      setSyncMessage(
-        newCount > 0
-          ? `${newCount} new email${newCount === 1 ? "" : "s"} synced${summarized > 0 ? ` · ${summarized} summarized` : ""}`
-          : summarized > 0
-            ? `${summarized} email${summarized === 1 ? "" : "s"} summarized`
-            : "Already up to date — no new emails",
-        true
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [refreshCounts, refreshOverview, summarizePending, setSyncMessage, setError]);
-
-  // Page through the ENTIRE mailbox (offset 0, 50, 100, …) storing every message
-  // as a raw row. Returns total new emails stored. Shared by Fetch All & Re-sync.
-  const pageThroughMailbox = useCallback(async (label: string): Promise<number> => {
-    let offset = 0;
+  // Downloads every message this account hasn't seen, draining the server's
+  // backlog. Returns how many new emails were stored.
+  //
+  // Was pageThroughMailbox, which walked a sequence-number offset (0, 50, 100…)
+  // over the *whole* mailbox on every run. The server now tracks a UID watermark,
+  // so there's no window to page over: each call returns only unseen mail and
+  // says how much is still queued. When there's nothing new the first call
+  // downloads zero messages and returns in milliseconds — which is why a normal
+  // sync and a full backfill are now literally the same operation.
+  const pullNewMail = useCallback(async (label: string): Promise<number> => {
     let totalNew = 0;
-    let totalCount = 0;
-    // Safety cap: 1000 pages (server PAGE_SIZE 50 → up to 50k messages).
+    // Safety cap: 1000 batches of 50 → up to 50k messages.
     for (let i = 0; i < 1000; i++) {
-      const res = await fetch("/api/email/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset }),
-      });
+      const res = await fetch("/api/email/process", { method: "POST" });
       if (redirectToLoginIfUnauthorized(res)) return totalNew;
       const data = await res.json().catch(() => ({ success: false, error: `Server error ${res.status}` }));
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to fetch emails");
 
       totalNew += data.newCount ?? 0;
-      totalCount = data.totalCount ?? 0;
-      const fetched = data.fetched ?? 0;
-      offset += fetched;
-      const isDone = fetched === 0 || offset >= totalCount;
+      const remaining = data.remaining ?? 0;
+      const isDone = remaining === 0;
       await throttledRefresh(isDone); // force a real refresh on the final batch
-      setSyncMessage(`${label} ${Math.min(offset, totalCount)}/${totalCount} scanned, ${totalNew} new`);
+
+      // Only worth narrating while there's actually a backlog draining; the
+      // common case finishes in one pass and shouldn't flash a progress toast.
+      if (!isDone) setSyncMessage(`${label} ${totalNew} downloaded, ${remaining} to go…`);
 
       if (isDone) break;
     }
     return totalNew;
   }, [throttledRefresh, setSyncMessage]);
 
-  // Clear the DB, then re-import the WHOLE mailbox and re-summarize from scratch —
-  // a clean full rebuild (also the way to purge legacy duplicate rows).
+  // Summarization runs detached from the sync it was triggered by, so the UI is
+  // never held open waiting on the LLM. This ref keeps a second Sync click from
+  // starting a competing loop over the same pending rows.
+  const isSummarizingRef = useRef(false);
+
+  // Kicks off (or joins) the background summarize loop. Deliberately not awaited
+  // by callers: an email is readable the moment it's stored, so blocking a sync
+  // on the AI only made the app feel slow for no benefit — and opening any
+  // still-pending email summarizes it on demand anyway (see loadEmailDetail).
+  const summarizeInBackground = useCallback(() => {
+    if (isSummarizingRef.current) return;
+    isSummarizingRef.current = true;
+    (async () => {
+      try {
+        const summarized = await summarizePending("Summarizing…");
+        if (summarized > 0) {
+          setSyncMessage(`${summarized} email${summarized === 1 ? "" : "s"} summarized`, true);
+        } else {
+          setSyncMessage(null);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Summarizing failed");
+      } finally {
+        isSummarizingRef.current = false;
+      }
+    })();
+  }, [summarizePending, setSyncMessage, setError]);
+
+  // Sync from IMAP: download anything unseen (fast — no AI, and nothing at all
+  // when there's no new mail), report immediately, then let summaries fill in
+  // behind the scenes.
+  const syncEmails = useCallback(async () => {
+    setIsSyncing(true);
+    setSyncMessage(null);
+    setError(null);
+    try {
+      const newCount = await pullNewMail("Downloading new mail…");
+
+      setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      setSyncMessage(
+        newCount > 0
+          ? `${newCount} new email${newCount === 1 ? "" : "s"} — summarizing in the background`
+          : "Already up to date — no new emails",
+        true
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+    } finally {
+      // Dropped before summarization starts: the mail is already stored and
+      // visible, so the spinner shouldn't outlive the part the user is waiting for.
+      setIsSyncing(false);
+      summarizeInBackground();
+    }
+  }, [pullNewMail, summarizeInBackground, setSyncMessage, setError]);
+
+  // Clear the DB, then re-read the WHOLE mailbox from scratch — a clean full
+  // rebuild (also the way to purge legacy duplicate rows). DELETE /api/summaries
+  // also drops the UID watermark, which is what makes the next pull start over
+  // from the beginning instead of thinking it's already up to date.
   const clearAndResync = useCallback(async () => {
     setIsSyncing(true);
     setSyncMessage(null);
@@ -331,41 +348,23 @@ export default function DashboardProvider({
       setSyncVersion((v) => v + 1);
       await Promise.all([refreshCounts(), refreshOverview()]);
 
-      const totalNew = await pageThroughMailbox("Re-importing all mail…");
-      setSyncMessage(`Re-fetched ${totalNew} email${totalNew === 1 ? "" : "s"} — summarizing…`);
-      const summarized = await summarizePending("Re-syncing…");
+      const totalNew = await pullNewMail("Re-importing all mail…");
 
       setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      setSyncMessage(`Re-synced ${summarized} email${summarized !== 1 ? "s" : ""} with fresh AI summaries`, true);
+      setSyncMessage(`Re-imported ${totalNew} email${totalNew === 1 ? "" : "s"} — summarizing in the background`, true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setIsSyncing(false);
+      summarizeInBackground();
     }
-  }, [refreshCounts, refreshOverview, pageThroughMailbox, summarizePending, setSyncMessage, setError]);
+  }, [refreshCounts, refreshOverview, pullNewMail, summarizeInBackground, setSyncMessage, setError]);
 
-  // Import the WHOLE mailbox (without clearing) and summarize all pending — for a
-  // full backfill on top of whatever is already stored.
-  const fetchAllEmails = useCallback(async () => {
-    setIsSyncing(true);
-    setSyncMessage(null);
-    setError(null);
-    try {
-      const totalNew = await pageThroughMailbox("Importing all mail…");
-      setSyncMessage(`Imported ${totalNew} new email${totalNew === 1 ? "" : "s"} — summarizing…`);
-      const summarized = await summarizePending("Summarizing…");
-
-      setLastFetched(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-      setSyncMessage(
-        `Imported all mail — ${totalNew} new email${totalNew === 1 ? "" : "s"}${summarized > 0 ? ` · ${summarized} summarized` : ""}`,
-        true
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [pageThroughMailbox, summarizePending, setSyncMessage, setError]);
+  // Kept as its own action because the button is familiar, but with a UID
+  // watermark this is exactly what Sync does: both drain everything unseen. The
+  // difference the old offset-paging version had — "newest page" vs "whole
+  // mailbox" — no longer exists.
+  const fetchAllEmails = syncEmails;
 
   // List rows omit body/htmlBody/attachments to keep page payloads light — fetch
   // the full content for one email the moment its detail pane is opened, caching
