@@ -17,17 +17,13 @@ function toEmailSummary(row: {
   candidateEmploymentStatus: string | null; candidateNoticePeriod: string | null;
   candidateLocation: string | null; candidateEmploymentType: string | null;
   summarized?: boolean;
-}, opts: { stripAttachmentData?: boolean } = {}): EmailSummary {
+}): EmailSummary {
+  // Only the detail path passes a non-null `attachments` — list callers select
+  // the column out entirely and get their counts from attachAttachmentCounts().
   let attachments: EmailAttachment[] | undefined;
   if (row.attachments) {
     try {
       attachments = JSON.parse(row.attachments);
-      // List views only need the filename/size to render the "N PDFs" badge —
-      // the base64 `data` is the actual bulk (can be MBs) and is only needed
-      // once a user opens the email, so it's lazily fetched via getEmailDetail().
-      if (opts.stripAttachmentData) {
-        attachments = attachments?.map((a) => ({ ...a, data: "" }));
-      }
     } catch { /* ignore */ }
   }
   return {
@@ -68,12 +64,17 @@ function toEmailSummary(row: {
 
 // List views only render subject/summary/badges — body/htmlBody are large (avg
 // ~8KB/email) and only needed for the single email a user has open, so they're
-// excluded here and fetched on demand via getEmailDetail(). attachments IS
-// fetched (needed for the "N PDFs" indicator badge/count), but its base64
-// `data` is stripped below before being sent to the client.
+// excluded here and fetched on demand via getEmailDetail().
+//
+// `attachments` is excluded too. It used to be selected so the list could render
+// its "N PDFs" badge from attachments.length, with the base64 `data` stripped in
+// Node afterwards — but by then Postgres had already shipped every byte of it
+// over the wire (megabytes per page, for a badge that only needs a number).
+// attachAttachmentCounts() below supplies the count via a COUNT-only query
+// instead, so `.length` still reads correctly on the client.
 const LIST_SELECT = {
   emailId: true, from: true, subject: true, date: true,
-  body: false, htmlBody: false, attachments: true,
+  body: false, htmlBody: false, attachments: false,
   attachmentSummary: true,
   summary: true, keyPoints: true, sentiment: true, category: true,
   priority: true, actionRequired: true, purpose: true, status: true, fetchedAt: true,
@@ -82,6 +83,41 @@ const LIST_SELECT = {
   candidateSkills: true, candidateEducation: true, candidateAchievements: true,
   candidateEmploymentStatus: true, candidateNoticePeriod: true, candidateLocation: true, candidateEmploymentType: true,
 } as const;
+
+// Fills in each summary's `attachments` with a correctly-sized array of
+// metadata-free placeholders, so list views can keep rendering their badge from
+// `attachments.length` without any of the base64 payload crossing the wire.
+// The real attachments (with `data`) arrive via getEmailDetail() when an email
+// is actually opened.
+//
+// Counting happens inside Postgres — the query returns one integer per row, not
+// the JSON itself. Best-effort: a legacy row whose `attachments` text isn't a
+// valid JSON array would make the cast throw, and a missing badge is a far
+// better outcome than a failed list query, so the whole thing degrades quietly.
+async function attachAttachmentCounts(summaries: EmailSummary[], account: string): Promise<void> {
+  const ids = summaries.map((s) => s.emailId);
+  if (ids.length === 0) return;
+  let counts: { emailId: string; n: number }[];
+  try {
+    counts = await prisma.$queryRaw<{ emailId: string; n: number }[]>(Prisma.sql`
+      SELECT "emailId", json_array_length("attachments"::json) AS n
+      FROM email_summaries
+      WHERE "account" = ${account}
+        AND "emailId" IN (${Prisma.join(ids)})
+        AND "attachments" IS NOT NULL
+    `);
+  } catch (err) {
+    console.warn("attachAttachmentCounts: count query failed, list will render without attachment badges —", err instanceof Error ? err.message : err);
+    return;
+  }
+  const byId = new Map(counts.map((c) => [c.emailId, Number(c.n)]));
+  for (const s of summaries) {
+    const n = byId.get(s.emailId) ?? 0;
+    s.attachments = n > 0
+      ? Array.from({ length: n }, () => ({ filename: "", contentType: "", size: 0, data: "" }))
+      : undefined;
+  }
+}
 
 export async function getCachedSummaries(query: EmailListQuery, account: string): Promise<EmailListResult> {
   const { page, pageSize, search, keywords, category, priority, status, actionRequired, stage, tags, skills, dateFrom, dateTo, sortBy = "date", sortOrder = "desc" } = query;
@@ -151,12 +187,10 @@ export async function getCachedSummaries(query: EmailListQuery, account: string)
     prisma.emailSummary.count({ where }),
   ]);
 
-  return {
-    summaries: rows.map((s) => toEmailSummary({ ...s, body: null, htmlBody: null }, { stripAttachmentData: true })),
-    total,
-    page,
-    pageSize,
-  };
+  const summaries = rows.map((s) => toEmailSummary({ ...s, body: null, htmlBody: null, attachments: null }));
+  await attachAttachmentCounts(summaries, account);
+
+  return { summaries, total, page, pageSize };
 }
 
 // Cheap COUNT-only queries for sidebar badges — always accurate across the whole
@@ -239,9 +273,11 @@ export async function getSummariesByIds(ids: string[], account: string): Promise
   });
   // preserve the order of ids
   const map = new Map(rows.map((r) => [r.emailId, r]));
-  return ids.flatMap((id) =>
-    map.has(id) ? [toEmailSummary({ ...map.get(id)!, body: null, htmlBody: null }, { stripAttachmentData: true })] : []
+  const summaries = ids.flatMap((id) =>
+    map.has(id) ? [toEmailSummary({ ...map.get(id)!, body: null, htmlBody: null, attachments: null })] : []
   );
+  await attachAttachmentCounts(summaries, account);
+  return summaries;
 }
 
 // Fetches the full row (including body/htmlBody/attachments) for a single email —

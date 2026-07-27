@@ -203,7 +203,10 @@ export default function DashboardProvider({
   // import that's dozens of redundant round-trips. This throttles those refreshes
   // to at most once every REFRESH_THROTTLE_MS, while `force` (used on the final
   // batch) always goes through, so the UI still ends up fully accurate.
-  const REFRESH_THROTTLE_MS = 2000;
+  // Low enough that rows visibly stream in as each summarize batch lands (a
+  // batch is now ~one AI call, not a sum of them), high enough that a 50-page
+  // import doesn't fire a refresh per page.
+  const REFRESH_THROTTLE_MS = 1000;
   const lastRefreshAtRef = useRef(0);
   const throttledRefresh = useCallback(async (force = false) => {
     const now = Date.now();

@@ -8,9 +8,13 @@ import type { SummaryLength } from "@/lib/types";
 // doesn't 504 on the platform default. Vercel Pro; Hobby caps at 60s.
 export const maxDuration = 300;
 
-// How many pending emails to summarize per call. Kept small so each request
-// stays well under maxDuration; the client loops until remaining hits 0.
-const BATCH = 10;
+// How many pending emails to summarize per call; the client loops until
+// remaining hits 0. Sized to exactly one concurrency wave inside
+// summarizeEmails (CHUNK_SIZE 8 × 3 chunks, all in flight at once under a pool
+// of 6) so the request's wall-clock is ~one chunk regardless of BATCH — 2.4×
+// the emails per call as the old sequential 10, in *less* time. Raising this
+// past one wave brings back the old sum-of-chunks behaviour and the 504 risk.
+const BATCH = 24;
 
 // POST /api/email/summarize-pending
 // Summarizes up to BATCH raw (summarized=false) emails for the signed-in account

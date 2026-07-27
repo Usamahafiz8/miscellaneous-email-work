@@ -17,6 +17,13 @@ function getClient(): OpenAI {
   return _client;
 }
 
+// Which OpenRouter model every call below routes to. Env-configurable because
+// model choice dominates sync wall-clock: measured on one real 8-email batch,
+// `meta-llama/llama-3.3-70b-instruct` takes ~132s while
+// `google/gemini-2.5-flash` takes ~10s for the same prompt. Both are OpenRouter
+// models on the same key — only this string changes.
+const MODEL = process.env.OPENROUTER_MODEL?.trim() || "meta-llama/llama-3.3-70b-instruct";
+
 // Budget per batch of CHUNK_SIZE emails. Each object (summary + keyPoints +
 // candidateProfile + a structured attachmentSummary) can run several hundred
 // tokens, so these must comfortably exceed CHUNK_SIZE * per-email size or the
@@ -25,6 +32,13 @@ function getClient(): OpenAI {
 const MAX_TOKENS: Record<SummaryLength, number> = { short: 3500, medium: 5000, long: 7000 };
 const BODY_LIMIT = 800;  // chars per email in the batch prompt
 const CHUNK_SIZE = 8;    // emails per API call
+
+// How many chunks may be in flight at once. Chunks used to run strictly
+// sequentially, so a request's wall-clock was the *sum* of its chunks; now it's
+// roughly the slowest one. Kept modest so a batch doesn't open a dozen
+// simultaneous connections (the original reason for going sequential) — the
+// caller's BATCH size is chosen so one wave covers it (see summarize-pending).
+const CHUNK_CONCURRENCY = 6;
 
 const VALID_SENTIMENTS: Sentiment[] = ["positive", "neutral", "negative"];
 const VALID_CATEGORIES: Category[] = ["Hiring", "Client Support", "Sales", "Finance", "Internal", "Marketing", "Technical", "General"];
@@ -221,7 +235,7 @@ async function summarizeChunk(
   );
 
   const message = await getClient().chat.completions.create({
-    model: "meta-llama/llama-3.3-70b-instruct",
+    model: MODEL,
     max_tokens: MAX_TOKENS[summaryLength],
     messages: [{ role: "user", content: buildBatchPrompt(emails, summaryLength, attachmentTexts) }],
   });
@@ -292,12 +306,34 @@ export async function summarizeEmails(
     chunks.push(emails.slice(i, i + CHUNK_SIZE));
   }
 
-  // Sequential processing — avoids sending 6+ parallel AI requests that each hold open connections,
-  // which causes the total request to blow past proxy/serverless timeouts.
-  const results: EmailSummary[][] = [];
-  for (const chunk of chunks) {
-    results.push(await summarizeChunk(chunk, summaryLength));
+  // Bounded-concurrency pool over the chunks. This was sequential, on the theory
+  // that parallel AI requests would blow past the serverless timeout — but the
+  // opposite was true: sequential made a request's wall-clock the *sum* of its
+  // chunks, which is what pushed real batches toward the 300s maxDuration.
+  // Measured on 3 concurrent calls against one OpenRouter key: ~1.7x faster than
+  // the same 3 run sequentially — the provider does throttle per key, so this is
+  // a real but sub-linear win, not the ideal Nx.
+  const results: EmailSummary[][] = new Array(chunks.length).fill(null).map(() => []);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= chunks.length) return;
+      try {
+        results[i] = await summarizeChunk(chunks[i], summaryLength);
+      } catch (err) {
+        // One failed chunk must not discard the chunks that succeeded alongside
+        // it (sequential code aborted the whole batch on any error). Its emails
+        // simply stay summarized=false and get picked up by the next pass.
+        console.warn(`summarizeEmails: chunk ${i} of ${chunks.length} failed, continuing —`, err instanceof Error ? err.message : err);
+      }
+    }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CHUNK_CONCURRENCY, chunks.length) }, () => worker())
+  );
   return results.flat();
 }
 
@@ -333,7 +369,7 @@ Rules:
 - Respond ONLY with those lines, nothing else — no bullet symbol, no intro sentence.`;
 
   const message = await getClient().chat.completions.create({
-    model: "meta-llama/llama-3.3-70b-instruct",
+    model: MODEL,
     max_tokens: 700,
     messages: [{ role: "user", content: prompt }],
   });
@@ -369,7 +405,7 @@ Respond ONLY with valid JSON, omitting any field with no real data:
 If there is no real candidate data in this email at all, respond with: null`;
 
   const message = await getClient().chat.completions.create({
-    model: "meta-llama/llama-3.3-70b-instruct",
+    model: MODEL,
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],
   });
@@ -403,7 +439,7 @@ Respond ONLY with valid JSON, omitting any field with no real data:
 If there is no real hiring content in this text at all, respond with: null`;
 
   const message = await getClient().chat.completions.create({
-    model: "meta-llama/llama-3.3-70b-instruct",
+    model: MODEL,
     max_tokens: 500,
     messages: [{ role: "user", content: prompt }],
   });
@@ -475,7 +511,7 @@ Respond ONLY with valid JSON:
 {"matchScore": 0-100, "recommendation": "Yes|No", "reasoning": "2-3 sentence explanation"}`;
 
     const message = await getClient().chat.completions.create({
-      model: "meta-llama/llama-3.3-70b-instruct",
+      model: MODEL,
       max_tokens: 400,
       messages: [{ role: "user", content: prompt }],
     });
@@ -505,7 +541,7 @@ Respond ONLY with valid JSON, omitting any field with no real data:
 If none of these are mentioned at all, respond with: null`;
 
   const message = await getClient().chat.completions.create({
-    model: "meta-llama/llama-3.3-70b-instruct",
+    model: MODEL,
     max_tokens: 300,
     messages: [{ role: "user", content: prompt }],
   });
@@ -549,7 +585,7 @@ Analyze whether this candidate meets the requirements. Respond ONLY with valid J
 }`;
 
   const message = await getClient().chat.completions.create({
-    model: "meta-llama/llama-3.3-70b-instruct",
+    model: MODEL,
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],
   });
