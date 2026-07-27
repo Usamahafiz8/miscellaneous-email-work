@@ -92,16 +92,23 @@ const LIST_SELECT = {
 // is actually opened.
 //
 // Counting happens inside Postgres — the query returns one integer per row, not
-// the JSON itself. Best-effort: a legacy row whose `attachments` text isn't a
-// valid JSON array would make the cast throw, and a missing badge is a far
-// better outcome than a failed list query, so the whole thing degrades quietly.
+// the JSON itself.
+//
+// It counts occurrences of the `"filename"` key rather than doing the obvious
+// json_array_length(attachments::json), because the column is text and the cast
+// throws on any row that isn't valid JSON — verified: a single legacy row holding
+// non-JSON text aborts the entire query, which would drop the attachment badge
+// from every email on the page, not just that one. String counting can't throw,
+// and every row this app writes goes through JSON.stringify of an
+// EmailAttachment[], where that key appears exactly once per attachment.
 async function attachAttachmentCounts(summaries: EmailSummary[], account: string): Promise<void> {
   const ids = summaries.map((s) => s.emailId);
   if (ids.length === 0) return;
   let counts: { emailId: string; n: number }[];
   try {
     counts = await prisma.$queryRaw<{ emailId: string; n: number }[]>(Prisma.sql`
-      SELECT "emailId", json_array_length("attachments"::json) AS n
+      SELECT "emailId",
+             (length("attachments") - length(replace("attachments", '"filename"', ''))) / length('"filename"') AS n
       FROM email_summaries
       WHERE "account" = ${account}
         AND "emailId" IN (${Prisma.join(ids)})
