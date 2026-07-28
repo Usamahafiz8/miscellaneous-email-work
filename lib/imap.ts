@@ -22,6 +22,26 @@ function isPdf(contentType: string, filename?: string): boolean {
   return !!filename?.toLowerCase().endsWith(".pdf");
 }
 
+// Ports that cannot possibly work here, and why. This client always opens with
+// implicit TLS (see createImapClient), so a plaintext or STARTTLS port doesn't
+// fail fast — it *hangs*, because the server sends a cleartext greeting and the
+// TLS client keeps waiting for a handshake, until the 10s connect timeout fires.
+// Ten seconds to find out you typed the wrong number is worth pre-empting.
+const WRONG_PORTS: Record<number, string> = {
+  143: "Port 143 is unencrypted IMAP. It can't be used here — the connection just hangs until it times out. Use port 993.",
+  110: "Port 110 is POP3, a different protocol. Use IMAP on port 993.",
+  995: "Port 995 is POP3, a different protocol. Use IMAP on port 993.",
+  25: "Port 25 is SMTP, which is for sending mail. This app only reads mail — use IMAP on port 993.",
+  465: "Port 465 is SMTP, which is for sending mail. This app only reads mail — use IMAP on port 993.",
+  587: "Port 587 is SMTP, which is for sending mail. This app only reads mail — use IMAP on port 993.",
+};
+
+// Non-null when the port is known-unusable, so callers can reject immediately
+// rather than opening a connection that's guaranteed to fail or stall.
+export function explainWrongPort(port: number): string | null {
+  return WRONG_PORTS[port] ?? null;
+}
+
 // Turns the raw error from node-imap/OpenSSL into something a person can act on.
 // These surface verbatim on the login screen otherwise, and the useful ones are
 // unreadable — a mistyped port reports

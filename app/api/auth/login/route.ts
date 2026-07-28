@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { testIMAPConnection, describeImapError } from "@/lib/imap";
+import { testIMAPConnection, describeImapError, explainWrongPort } from "@/lib/imap";
 import { setSessionCookie } from "@/lib/session";
 
 // POST /api/auth/login
@@ -32,6 +32,14 @@ export async function POST(request: NextRequest) {
     host: host?.trim() || process.env.IMAP_HOST || "imap.purelymail.com",
     port: Number(port) || Number(process.env.IMAP_PORT) || 993,
   };
+
+  // Reject ports that can't work before opening a socket: an unencrypted port
+  // doesn't refuse the connection, it stalls until the 10s timeout, so without
+  // this the user waits ten seconds for a message about a typo.
+  const portProblem = explainWrongPort(config.port);
+  if (portProblem) {
+    return NextResponse.json({ success: false, error: portProblem }, { status: 400 });
+  }
 
   try {
     await testIMAPConnection(config);
