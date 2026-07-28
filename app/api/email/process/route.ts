@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchNewEmailsByUid } from "@/lib/imap";
+import { fetchNewEmailsByUid, describeImapError } from "@/lib/imap";
 import { cacheRawEmails, getCachedSummaries, getMailboxCursor, setMailboxCursor } from "@/lib/cache";
 import { parseEmailListQuery } from "@/lib/queryParams";
 import { currentAccount, currentImapConfig } from "@/lib/session";
@@ -74,7 +74,10 @@ export async function POST() {
       uidValidityChanged: result.uidValidityChanged,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Processing failed";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    // Same translation as sign-in: a sync can fail for exactly the same
+    // provider-specific reasons (Gmail revoking an app password, IMAP switched
+    // off), and raw node-imap text in a toast is no more readable than it was
+    // on the login screen.
+    return NextResponse.json({ success: false, error: describeImapError(err, config) }, { status: 500 });
   }
 }

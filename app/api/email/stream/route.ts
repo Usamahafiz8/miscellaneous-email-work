@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchNewEmailsByUid } from "@/lib/imap";
+import { fetchNewEmailsByUid, describeImapError } from "@/lib/imap";
 import { cacheRawEmails, getMailboxCursor, setMailboxCursor } from "@/lib/cache";
 import { currentAccount, currentImapConfig } from "@/lib/session";
 import type { EmailMessage } from "@/lib/types";
@@ -90,7 +90,7 @@ export async function POST() {
           uidValidityChanged: result.uidValidityChanged,
         });
       } catch (err) {
-        send({ type: "error", error: err instanceof Error ? err.message : "Sync failed" });
+        send({ type: "error", error: describeImapError(err, config) });
       } finally {
         try { controller.close(); } catch { /* already closed by the client */ }
       }

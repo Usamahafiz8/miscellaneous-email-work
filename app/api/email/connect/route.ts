@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { testIMAPConnection } from "@/lib/imap";
+import { testIMAPConnection, describeImapError } from "@/lib/imap";
 import { currentImapConfig } from "@/lib/session";
 
 // IMAP round-trip — give it more than the platform default. (Previously set in
@@ -17,7 +17,6 @@ export async function POST() {
     await testIMAPConnection(config);
     return NextResponse.json({ success: true, message: "Connection successful" });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Connection failed";
-    return NextResponse.json({ success: false, error: message }, { status: 400 });
+    return NextResponse.json({ success: false, error: describeImapError(err, config) }, { status: 400 });
   }
 }

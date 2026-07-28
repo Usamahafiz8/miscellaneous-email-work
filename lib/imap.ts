@@ -57,7 +57,13 @@ export function describeImapError(err: unknown, config?: Pick<IMAPConfig, "host"
     return `That port doesn't accept a secure connection${where}. This app reads mail over IMAP, not SMTP — so SMTP ports (587, 465, 25) won't work. Use your provider's IMAP host on port 993, e.g. imap.gmail.com:993 for Gmail.`;
   }
   if (/AUTHENTICATIONFAILED|Invalid credentials|LOGIN failed|authentication failed/i.test(raw)) {
-    return `The server rejected that email and password${where}. Gmail, Yahoo and two-step-verified Outlook accounts refuse normal passwords — you need an app password instead of your login password.`;
+    // Only providers that actually mandate app passwords get told to use one —
+    // sending a PurelyMail user hunting for an app password they can't create
+    // would be worse than saying nothing.
+    const needsAppPassword = /gmail|googlemail|yahoo|outlook|office365|hotmail|live\.com/i.test(config?.host ?? "");
+    return needsAppPassword
+      ? `The server rejected that email and password${where}. This provider refuses normal account passwords over IMAP — generate an app password and use that instead. For Gmail: myaccount.google.com/apppasswords (requires 2-Step Verification, and IMAP enabled under Settings → Forwarding and POP/IMAP).`
+      : `The server rejected that email and password${where}. Check both, and confirm IMAP access is enabled for this mailbox.`;
   }
   if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(raw)) {
     return `Couldn't find that mail server${where}. Check the IMAP host for a typo.`;

@@ -111,7 +111,9 @@ export default function LoginPage() {
           <p className="text-slate-400 text-sm mt-1 text-center max-w-xs">
             MailAI reads your inbox and summarizes what matters, so you don&rsquo;t have to open every email.
           </p>
-          <p className="text-slate-500 text-xs mt-2">Use your PurelyMail email &amp; password to sign in</p>
+          <p className="text-slate-500 text-xs mt-2">
+            Sign in with any IMAP mailbox — PurelyMail, Gmail, Outlook or Yahoo
+          </p>
         </div>
 
         {/* Card */}

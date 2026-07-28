@@ -3,7 +3,8 @@ import { testIMAPConnection, describeImapError, explainWrongPort } from "@/lib/i
 import { setSessionCookie } from "@/lib/session";
 
 // POST /api/auth/login
-// Authenticates a PurelyMail (or any IMAP) user by attempting a real IMAP login
+// Authenticates against any IMAP provider (PurelyMail, Gmail, Outlook, Yahoo,
+// or a custom host) by attempting a real IMAP login
 // with their email + password. On success, the credentials are encrypted into an
 // httpOnly session cookie; they're never stored server-side. body:
 //   { email, password, host?, port? }  (host/port default to PurelyMail)
