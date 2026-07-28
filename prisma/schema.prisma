@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model EmailSummary {
+  emailId        String   @id
+  // Tenant key — the lowercased email of the PurelyMail account this summary was
+  // synced from. Every query is scoped by it so users never see each other's mail.
+  // Default attributes pre-existing (single-tenant) rows to the original mailbox.
+  account        String   @default("access@asadullah.io")
+  from           String
+  subject        String
+  date           String
+  summary        String
+  keyPoints      String[]
+  sentiment      String
+  category       String
+  priority       String
+  priorityRank   Int      @default(2) // Critical=0, High=1, Medium=2, Low=3 — lets Prisma orderBy sort priority correctly (plain string sort would go alphabetical)
+  actionRequired String
+  purpose        String
+  body           String?
+  htmlBody       String?
+  attachments       String?  // JSON: EmailAttachment[]
+  attachmentSummary String?  // AI-generated summary of PDF attachment content
+  status            String   @default("New")
+  stage             String   @default("New") // hiring pipeline folder — only meaningful when category="Hiring"
+  tags              String[] @default([])    // free-form, user-added, any email
+
+  // Lazy-summarization flag. Sync stores raw emails with summarized=false (no AI
+  // run yet); the LLM fills in the summary/category/priority/candidate fields the
+  // first time the email is opened, flipping this to true. Defaults true so every
+  // pre-existing (already-summarized) row keeps its current behaviour.
+  summarized        Boolean  @default(true)
+
+  // Structured candidate profile — scalar columns (not a Json blob) so the
+  // Candidate Sheet can render/sort/filter each field directly, the same way
+  // keyPoints already works. Populated by the AI batch prompt for Hiring
+  // emails (with or without a PDF attachment); null for everything else.
+  candidateName         String?
+  candidateRole         String?
+  candidateExperience   String?
+  candidateSkills       String[] @default([])
+  candidateEducation    String?
+  candidateAchievements String?
+
+  // AI-extracted employment/logistics details, for matching against a
+  // JobPosting's requirements on the /jobs page. Same free-text philosophy
+  // as candidateRole/candidateExperience — too varied for enums.
+  candidateEmploymentStatus String?
+  candidateNoticePeriod     String?
+  candidateLocation         String?
+  candidateEmploymentType   String?
+
+  fetchedAt      DateTime @default(now())
+
+  matches CandidateMatch[]
+
+  @@index([account])
+  @@index([account, date(sort: Desc)])
+  @@index([category])
+  @@index([priorityRank])
+  @@index([status])
+  @@index([actionRequired])
+  @@index([stage])
+  @@map("email_summaries")
+}
+
+// Per-account IMAP sync watermark. Without this, a sync has no memory of what
+// it already downloaded: the old code re-scanned a fixed 50-message window of
+// the mailbox every time and discarded duplicates afterwards, so syncing a
+// mailbox with no new mail still pulled 50 complete messages (bodies, HTML,
+// base64 PDFs) off the server.
+//
+// IMAP UIDs are stable and monotonic per mailbox, so remembering the highest one
+// seen turns a sync into "UID SEARCH <lastSeenUid+1>:*" — the server returns
+// nothing (sub-second) or exactly the new messages, and only those get
+// downloaded. Dedup stops being something we have to get right after the fact.
+//
+// uidValidity is the mailbox generation counter: if the server ever changes it,
+// every stored UID is meaningless and the mailbox must be re-read from scratch.
+model MailboxSync {
+  account     String   @id
+  // BigInt because both are 32-bit *unsigned* on the wire, which overflows
+  // Postgres int4. Values stay well under 2^53, so reading them back as JS
+  // numbers is lossless.
+  uidValidity BigInt
+  lastSeenUid BigInt   @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@map("mailbox_sync")
+}
+
+// A saved job posting on the /jobs page — HR pastes a job description, AI
+// extracts structured requirements below, HR can edit/add to them, then
+// scans all Hiring candidates for a match score (see CandidateMatch).
+model JobPosting {
+  id             String  @id @default(cuid())
+  // Tenant key — see EmailSummary.account. Scopes job postings per signed-in user.
+  account        String  @default("access@asadullah.io")
+  title          String
+  jobDescription String?
+
+  minExperienceYears       Int?
+  maxExperienceYears       Int?
+  techStack                String[] @default([]) // combined tech stack & skills, one field
+  requiredEmploymentStatus String?
+  requiredNoticePeriod     String?
+  requiredLocation         String?
+  requiredEmploymentType   String?
+  otherCriteria            String?
+
+  lastScannedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  matches CandidateMatch[]
+
+  @@index([account])
+  @@map("job_postings")
+}
+
+// One AI-computed match result for a (JobPosting, candidate email) pair.
+// Re-scanning a job upserts these rows rather than duplicating them.
+model CandidateMatch {
+  id           String       @id @default(cuid())
+  jobPostingId String
+  jobPosting   JobPosting   @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  emailId      String
+  emailSummary EmailSummary @relation(fields: [emailId], references: [emailId], onDelete: Cascade)
+
+  matchScore     Int
+  recommendation String // "Yes" | "No" — plain string, matching this codebase's
+                         // existing convention (Category/Priority/Sentiment aren't native enums either)
+  reasoning      String
+  matchedAt      DateTime @default(now())
+
+  @@unique([jobPostingId, emailId])
+  @@index([jobPostingId, matchScore])
+  @@map("candidate_matches")
+}
