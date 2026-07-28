@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { testIMAPConnection } from "@/lib/imap";
+import { testIMAPConnection, describeImapError } from "@/lib/imap";
 import { setSessionCookie } from "@/lib/session";
 
 // POST /api/auth/login
@@ -36,10 +36,11 @@ export async function POST(request: NextRequest) {
   try {
     await testIMAPConnection(config);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Invalid credentials";
-    // IMAP servers surface bad creds as a login/auth error — present it as a 401.
+    // Raw node-imap/OpenSSL text is unreadable (a mistyped port reports a
+    // tls_validate_record_header failure), so translate it into the actual
+    // problem before it reaches the login screen.
     return NextResponse.json(
-      { success: false, error: `Sign-in failed: ${message}` },
+      { success: false, error: describeImapError(err, config) },
       { status: 401 }
     );
   }

@@ -2,16 +2,45 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { IMAP_PROVIDERS, providerForEmail, type ProviderKey } from "@/lib/types";
 
-const DEFAULT_HOST = "imap.purelymail.com";
-const DEFAULT_PORT = 993;
+const DEFAULT_HOST = IMAP_PROVIDERS.purelymail.host;
+const DEFAULT_PORT = IMAP_PROVIDERS.purelymail.port;
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [host, setHost] = useState(DEFAULT_HOST);
-  const [port, setPort] = useState(DEFAULT_PORT);
+  // Explicit generics: IMAP_PROVIDERS is `as const`, so the defaults are literal
+  // types and inference would pin these to just the PurelyMail values.
+  const [host, setHost] = useState<string>(DEFAULT_HOST);
+  const [port, setPort] = useState<number>(DEFAULT_PORT);
+  // Which provider's IMAP settings are in use. Auto-follows the address the user
+  // types until they pick one themselves — the point is that nobody should ever
+  // have to know their IMAP host, which is how SMTP settings end up in there.
+  const [provider, setProvider] = useState<ProviderKey>("purelymail");
+  const [providerPinned, setProviderPinned] = useState(false);
+
+  function applyProvider(key: ProviderKey) {
+    setProvider(key);
+    const preset = IMAP_PROVIDERS[key];
+    if (preset.host) setHost(preset.host);
+    setPort(preset.port);
+  }
+
+  // Detect from the domain as they type (foo@gmail.com → Gmail's IMAP host), but
+  // never override a provider they chose deliberately.
+  useEffect(() => {
+    if (providerPinned) return;
+    const detected = providerForEmail(email);
+    if (!detected || detected === provider) return;
+    setProvider(detected);
+    const preset = IMAP_PROVIDERS[detected];
+    if (preset.host) setHost(preset.host);
+    setPort(preset.port);
+  }, [email, provider, providerPinned]);
+
+  const providerNote = IMAP_PROVIDERS[provider].note;
   const [showPassword, setShowPassword] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -144,6 +173,30 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Provider picker — fills in the correct IMAP host/port, so the
+              Advanced fields below are a genuine override rather than the only
+              way to reach a non-PurelyMail mailbox. */}
+          <div>
+            <label htmlFor="provider" className="block text-xs font-medium text-gray-500 mb-1">
+              Email provider
+            </label>
+            <select
+              id="provider"
+              value={provider}
+              onChange={(e) => { setProviderPinned(true); applyProvider(e.target.value as ProviderKey); }}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#667eea]/30 focus:border-[#667eea]"
+            >
+              {Object.entries(IMAP_PROVIDERS).map(([key, p]) => (
+                <option key={key} value={key}>{p.label}</option>
+              ))}
+            </select>
+            {providerNote && (
+              <p className="mt-2 text-xs text-amber-700 bg-amber-50 ring-1 ring-inset ring-amber-200 rounded-lg px-3 py-2">
+                {providerNote}
+              </p>
+            )}
+          </div>
+
           {/* Advanced: IMAP server override */}
           <div>
             <button
@@ -156,6 +209,12 @@ export default function LoginPage() {
               </svg>
               Advanced (IMAP server)
             </button>
+            {showAdvanced && (
+              <p className="mt-2 text-[11px] text-gray-500">
+                These are <strong>IMAP</strong> (incoming) settings — this app reads your mail and never sends any.
+                SMTP ports (587, 465, 25) will fail the secure handshake. IMAP is port 993.
+              </p>
+            )}
             {showAdvanced && (
               <div className="grid grid-cols-3 gap-3 mt-3">
                 <div className="col-span-2">

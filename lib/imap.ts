@@ -22,6 +22,39 @@ function isPdf(contentType: string, filename?: string): boolean {
   return !!filename?.toLowerCase().endsWith(".pdf");
 }
 
+// Turns the raw error from node-imap/OpenSSL into something a person can act on.
+// These surface verbatim on the login screen otherwise, and the useful ones are
+// unreadable — a mistyped port reports
+// "error:0A00010B:SSL routines:tls_validate_record_header:wrong version number",
+// which says nothing about the actual mistake (an SMTP or plaintext port given
+// to a client that always speaks implicit TLS).
+export function describeImapError(err: unknown, config?: Pick<IMAPConfig, "host" | "port">): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const where = config ? ` (${config.host}:${config.port})` : "";
+
+  // TLS handshake got a non-TLS reply: the port isn't an SSL port at all.
+  if (/wrong version number|record layer failure|packet length too long/i.test(raw)) {
+    return `That port doesn't accept a secure connection${where}. This app reads mail over IMAP, not SMTP — so SMTP ports (587, 465, 25) won't work. Use your provider's IMAP host on port 993, e.g. imap.gmail.com:993 for Gmail.`;
+  }
+  if (/AUTHENTICATIONFAILED|Invalid credentials|LOGIN failed|authentication failed/i.test(raw)) {
+    return `The server rejected that email and password${where}. Gmail, Yahoo and two-step-verified Outlook accounts refuse normal passwords — you need an app password instead of your login password.`;
+  }
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(raw)) {
+    return `Couldn't find that mail server${where}. Check the IMAP host for a typo.`;
+  }
+  if (/ECONNREFUSED/i.test(raw)) {
+    return `Nothing is listening on that port${where}. IMAP is almost always port 993.`;
+  }
+  if (/ETIMEDOUT|timed out/i.test(raw)) {
+    return `The mail server didn't respond${where}. Port 143 will hang like this because it isn't encrypted — try 993. Otherwise a firewall may be blocking IMAP.`;
+  }
+  if (/certificate|self.signed|CERT_/i.test(raw)) {
+    return `The mail server's security certificate couldn't be verified${where}.`;
+  }
+  // Unrecognized — pass it through rather than swallow a real diagnostic.
+  return raw;
+}
+
 function createImapClient(config: IMAPConfig): Imap {
   return new Imap({
     user: config.email,
